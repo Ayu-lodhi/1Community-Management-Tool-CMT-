@@ -1,0 +1,116 @@
+import { ROLES } from './roles.js';
+
+/**
+ * Granular Permission Codes
+ * Single source of truth for authorization checks across frontend and backend.
+ */
+export const PERMISSIONS = Object.freeze({
+  // User & Admin Management
+  USERS_READ: 'users:read',
+  USERS_CREATE: 'users:create',
+  USERS_BULK_IMPORT: 'users:bulk_import',
+  USERS_DEACTIVATE: 'users:deactivate',
+  USERS_REVOKE: 'users:revoke',
+  USERS_RESET_PASSWORD: 'users:reset_password',
+  USERS_ASSIGN_ROLE: 'users:assign_role',
+  USERS_GRANT_PERMISSION: 'users:grant_permission',
+
+  // Event & Shift Operations
+  EVENTS_READ: 'events:read',
+  EVENTS_CREATE: 'events:create',
+  EVENTS_UPDATE: 'events:update',
+  EVENTS_CLOSE: 'events:close',
+  SHIFTS_MANAGE: 'shifts:manage',
+
+  // Applications
+  APPLICATIONS_APPLY: 'applications:apply',
+  APPLICATIONS_READ_OWN: 'applications:read_own',
+  APPLICATIONS_READ_ALL: 'applications:read_all',
+  APPLICATIONS_REVIEW: 'applications:review', // Approve / Reject
+
+  // Attendance
+  ATTENDANCE_GENERATE_QR: 'attendance:generate_qr',
+  ATTENDANCE_CHECKIN_SELF: 'attendance:checkin_self',
+  ATTENDANCE_MARK_MANUAL: 'attendance:mark_manual',
+  ATTENDANCE_READ: 'attendance:read',
+
+  // Chat
+  CHAT_READ: 'chat:read',
+  CHAT_WRITE: 'chat:write',
+  CHAT_MODERATE: 'chat:moderate',
+
+  // Certificates
+  CERTIFICATES_VIEW_OWN: 'certificates:view_own',
+  CERTIFICATES_GENERATE: 'certificates:generate',
+  CERTIFICATES_REVOKE: 'certificates:revoke',
+
+  // Analytics & Audits
+  ANALYTICS_PLATFORM_READ: 'analytics:platform_read',
+  ANALYTICS_TEAM_READ: 'analytics:team_read',
+  AUDIT_LOGS_READ: 'audit_logs:read',
+  SYSTEM_CONFIG_MANAGE: 'system_config:manage'
+});
+
+/**
+ * Role-Default Permission Grants
+ */
+export const ROLE_DEFAULT_PERMISSIONS = Object.freeze({
+  [ROLES.SUPER_ADMIN]: Object.values(PERMISSIONS),
+
+  [ROLES.ADMIN]: [
+    PERMISSIONS.USERS_READ,
+    PERMISSIONS.USERS_CREATE,
+    PERMISSIONS.USERS_BULK_IMPORT,
+    PERMISSIONS.USERS_DEACTIVATE,
+    PERMISSIONS.USERS_RESET_PASSWORD,
+    PERMISSIONS.USERS_ASSIGN_ROLE,
+    PERMISSIONS.USERS_GRANT_PERMISSION,
+    PERMISSIONS.EVENTS_READ,
+    PERMISSIONS.EVENTS_CREATE,
+    PERMISSIONS.EVENTS_UPDATE,
+    PERMISSIONS.EVENTS_CLOSE,
+    PERMISSIONS.SHIFTS_MANAGE,
+    PERMISSIONS.APPLICATIONS_READ_ALL,
+    PERMISSIONS.APPLICATIONS_REVIEW,
+    PERMISSIONS.ATTENDANCE_GENERATE_QR,
+    PERMISSIONS.ATTENDANCE_MARK_MANUAL,
+    PERMISSIONS.ATTENDANCE_READ,
+    PERMISSIONS.CHAT_READ,
+    PERMISSIONS.CHAT_WRITE,
+    PERMISSIONS.CHAT_MODERATE,
+    PERMISSIONS.CERTIFICATES_GENERATE,
+    PERMISSIONS.ANALYTICS_PLATFORM_READ,
+    PERMISSIONS.ANALYTICS_TEAM_READ,
+    PERMISSIONS.AUDIT_LOGS_READ
+  ],
+
+  [ROLES.T3_EXECUTIVE]: [
+    PERMISSIONS.USERS_READ,
+    PERMISSIONS.EVENTS_READ,
+    PERMISSIONS.APPLICATIONS_READ_ALL,
+    PERMISSIONS.APPLICATIONS_REVIEW,
+    PERMISSIONS.ATTENDANCE_MARK_MANUAL,
+    PERMISSIONS.ATTENDANCE_READ,
+    PERMISSIONS.CHAT_READ,
+    PERMISSIONS.CHAT_WRITE,
+    PERMISSIONS.ANALYTICS_TEAM_READ
+  ],
+
+  [ROLES.T2_ASSOCIATE]: [
+    PERMISSIONS.EVENTS_READ,
+    PERMISSIONS.APPLICATIONS_READ_ALL,
+    PERMISSIONS.ATTENDANCE_READ,
+    PERMISSIONS.CHAT_READ,
+    PERMISSIONS.CHAT_WRITE
+  ],
+
+  [ROLES.T1_VOLUNTEER]: [
+    PERMISSIONS.EVENTS_READ,
+    PERMISSIONS.APPLICATIONS_APPLY,
+    PERMISSIONS.APPLICATIONS_READ_OWN,
+    PERMISSIONS.ATTENDANCE_CHECKIN_SELF,
+    PERMISSIONS.CHAT_READ,
+    PERMISSIONS.CHAT_WRITE,
+    PERMISSIONS.CERTIFICATES_VIEW_OWN
+  ]
+});

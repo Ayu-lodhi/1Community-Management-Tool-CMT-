@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+*/node_modules/
+*/*/node_modules/
+
+# Environment variables & secrets
+.env*
+!.env.example
+*.pem
+*.key
+
+# Build outputs
+dist/
+build/
+*/dist/
+*/build/
+
+# Logs
+*.log
+logs/
+*/logs/
+
+# Test artifacts & documentation
+coverage/
+*/coverage/
+__tests__/
+*.test.js
+*.spec.js
+test/
+tests/
+*.md
+*.markdown
+
+# Deployment & tooling artifacts
+.vercel
+.claude
+.archify
+.agents
+skills-lock.json
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

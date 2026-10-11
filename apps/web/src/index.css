@@ -1,0 +1,116 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { @apply antialiased bg-slate-50 text-slate-900 font-sans; }
+}
+
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /* Industrial retro console styles */
+  .industrial-chassis {
+    background: linear-gradient(180deg, #373b43 0%, #26292f 100%);
+    border: 2px solid #4a505b;
+    box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.7), 0 3px 6px rgba(0, 0, 0, 0.25);
+    position: relative;
+  }
+
+  .industrial-chassis:focus-within {
+    border-color: #717c8d;
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.8), 0 0 0 2px rgba(212, 175, 55, 0.4);
+  }
+
+  .screw-rivet {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #b0b7c3 20%, #464a52 80%);
+    border: 1px solid #1a1c20;
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.6), 0 1px 2px rgba(0, 0, 0, 0.7);
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  .screw-rivet::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 5px;
+    height: 1.5px;
+    background: #181a1f;
+    transform: translate(-50%, -50%) rotate(45deg);
+  }
+
+  .led-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.8);
+    transition: all 0.25s ease;
+    display: inline-block;
+  }
+
+  .led-green {
+    background: radial-gradient(circle, #4ade80 20%, #16a34a 80%);
+    box-shadow: 0 0 8px #22c55e, inset 0 1px 1px rgba(255, 255, 255, 0.7);
+  }
+
+  .led-amber {
+    background: radial-gradient(circle, #fde047 20%, #d97706 80%);
+    box-shadow: 0 0 7px #eab308, inset 0 1px 1px rgba(255, 255, 255, 0.7);
+  }
+
+  .led-red {
+    background: radial-gradient(circle, #f87171 20%, #dc2626 80%);
+    box-shadow: 0 0 7px #ef4444, inset 0 1px 1px rgba(255, 255, 255, 0.7);
+  }
+
+  .led-dim-green {
+    background: radial-gradient(circle, #2d6a4f 20%, #1b4332 80%);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  }
+
+  .led-dim-amber {
+    background: radial-gradient(circle, #78590f 20%, #4a3608 80%);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  }
+
+  .led-dim-red {
+    background: radial-gradient(circle, #7f1d1d 20%, #450a0a 80%);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  }
+
+  .industrial-button {
+    background: linear-gradient(180deg, #a82d2d 0%, #821c1c 55%, #661414 100%);
+    border: 2px solid #4a1313;
+    border-top-color: #c94b4b;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.35);
+    text-shadow: 0 -1px 2px rgba(0, 0, 0, 0.7);
+    transition: all 0.15s ease;
+  }
+
+  .industrial-button:hover:not(:disabled) {
+    background: linear-gradient(180deg, #bd3535 0%, #942121 55%, #751717 100%);
+    box-shadow: 0 6px 14px rgba(130, 28, 28, 0.45), inset 0 1px 2px rgba(255, 255, 255, 0.45);
+  }
+
+  .industrial-button:active:not(:disabled) {
+    transform: translateY(2px);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 2px 4px rgba(0, 0, 0, 0.7);
+  }
+
+  .blueprint-grid {
+    background-color: #f0ede6;
+    background-image: 
+      radial-gradient(#d5ccbf 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+}
