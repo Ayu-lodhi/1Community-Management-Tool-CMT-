@@ -49,5 +49,11 @@ coverage/
 .agents/
 skills-lock.json
 
+# Vercel deployment metadata & cache
+.vercel/
+.vercel
+
+# Test & debug dumps
+docs/routes-*.txt
 targets.txt
 test_sec503.txt
