@@ -26,11 +26,13 @@ const initTransporter = async () => {
 
   if (hasRealCreds) {
     console.log('EMAIL_INIT :: Using real SMTP:', process.env.EMAIL_HOST);
+    const port = parseInt(process.env.EMAIL_PORT, 10) || 587;
+    const isSecure = port === 465;
     transporter = nodemailer.createTransport({
       host: process.env.EMAIL_HOST,
-      port: parseInt(process.env.EMAIL_PORT) || 587,
-      secure: false,
-      requireTLS: true,
+      port,
+      secure: isSecure,
+      requireTLS: !isSecure,
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
