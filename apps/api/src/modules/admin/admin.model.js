@@ -9,6 +9,14 @@ const mfaSchema = new mongoose.Schema({
 }, { _id: false });
 
 const userSchema = new mongoose.Schema({
+  userId: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true,
+    uppercase: true,
+    immutable: true,
+  },
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true, lowercase: true },
   phone: { type: String, default: '' },
@@ -76,8 +84,34 @@ const userSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now },
 });
 
+userSchema.pre('validate', async function (next) {
+  if (this.isNew && (!this.userId || typeof this.userId !== 'string' || !this.userId.trim())) {
+    try {
+      const { getNextUserId } = require('../../services/userId.service');
+      this.userId = await getNextUserId();
+    } catch (_) {}
+  }
+  if (this.isNew && (!this.userId || typeof this.userId !== 'string' || !this.userId.trim())) {
+    return next(new Error('userId is required for new users'));
+  }
+  next();
+});
+
 userSchema.pre('save', function (next) {
+  if (!this.isNew && this.isModified('userId')) {
+    return next(new Error('userId is immutable'));
+  }
   this.updatedAt = new Date();
+  next();
+});
+
+userSchema.pre(['updateOne', 'findOneAndUpdate', 'findByIdAndUpdate'], function (next) {
+  const update = this.getUpdate();
+  if (update) {
+    if (update.userId !== undefined || (update.$set && update.$set.userId !== undefined)) {
+      return next(new Error('userId is immutable'));
+    }
+  }
   next();
 });
 

@@ -4,6 +4,7 @@ const { disconnectUserSockets } = require('../../config/socket');
 const { invalidateUserPermissions } = require('../../core/cache/permissionCache');
 const { recordPermissionAudit } = require('../../core/utils/auditLogger');
 const User = require('./admin.model');
+const { getNextUserId } = require('../../services/userId.service');
 const { sendWelcomeEmail, sendPasswordResetLinkEmail, sendProfileUpdatedEmail, sendPasswordChangedEmail, sendEmailChangedEmail } = require('../../services/email.service');
 
 const generateDefaultPassword = () => {
@@ -32,8 +33,10 @@ exports.createUser = async (data, callerRole = null) => {
 
   const tempPassword = generateDefaultPassword();
   const hashedPassword = await bcrypt.hash(tempPassword, 12);
+  const userId = (data.userId || await getNextUserId()).toUpperCase();
 
   const user = await User.create({
+    userId,
     name: data.name,
     email: data.email.toLowerCase(),
     phone: data.phone || '',
@@ -79,6 +82,7 @@ exports.bulkCreateUsers = async (rows, callerRole = null) => {
         status: 'created',
         user: {
           _id: user._id,
+          userId: user.userId,
           name: user.name,
           email: user.email,
           role: user.role,
