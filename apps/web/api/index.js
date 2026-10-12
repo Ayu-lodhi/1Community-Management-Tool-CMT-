@@ -45,7 +45,7 @@ function getMissingEnvVars() {
 }
 
 async function connectToDatabase() {
-  if (mongoose.connection && mongoose.connection.readyState === 1) {
+  if (mongoose.connection?.readyState === 1) {
     return mongoose.connection;
   }
 

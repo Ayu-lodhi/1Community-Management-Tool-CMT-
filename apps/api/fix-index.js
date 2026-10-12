@@ -30,14 +30,16 @@ const fixIndexes = async () => {
     console.log('Current:', attIdx.map(i => i.name).join(', ') || '(empty)');
 
     const oldAttIdx = ['studentId_1_date_1', 'studentId_1_teamName_1_date_1'];
-    for (const name of oldAttIdx) {
-      try {
-        await attColl.dropIndex(name);
-        console.log('Dropped:', name);
-      } catch (e) {
-        if (e.code !== 27) console.log('Skip:', name);
-      }
-    }
+    await Promise.allSettled(
+      oldAttIdx.map(async (name) => {
+        try {
+          await attColl.dropIndex(name);
+          console.log('Dropped:', name);
+        } catch (e) {
+          if (e.code !== 27) console.log('Skip:', name);
+        }
+      })
+    );
 
     try {
       await attColl.createIndex(
@@ -56,14 +58,16 @@ const fixIndexes = async () => {
     console.log('Current:', tsIdx.map(i => i.name).join(', ') || '(collection not created yet)');
 
     const oldTsIdx = ['userId_1_date_1'];
-    for (const name of oldTsIdx) {
-      try {
-        await tsColl.dropIndex(name);
-        console.log('Dropped:', name);
-      } catch (e) {
-        if (e.code !== 27) console.log('Skip:', name);
-      }
-    }
+    await Promise.allSettled(
+      oldTsIdx.map(async (name) => {
+        try {
+          await tsColl.dropIndex(name);
+          console.log('Dropped:', name);
+        } catch (e) {
+          if (e.code !== 27) console.log('Skip:', name);
+        }
+      })
+    );
 
     try {
       await tsColl.createIndex(
