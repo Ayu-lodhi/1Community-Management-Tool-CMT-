@@ -36,23 +36,24 @@ const ensureDbConnected = async () => {
   }
 };
 
-// Shared by every mounted HTTP router and the Socket.io handshake.
-const authenticateToken = async (token, allowPasswordChange = false) => {
-  const decoded = tokens.verify(token, allowPasswordChange ? ['access', 'password-change'] : 'access');
-  let user;
+const fetchAuthUser = async (userId) => {
   try {
     await ensureDbConnected();
-    user = await repository.findById(decoded.sub);
+    return await repository.findById(userId);
   } catch (err) {
     if (err.statusCode) throw err;
     const dbErr = new Error('Service temporarily unavailable');
     dbErr.statusCode = 503;
     throw dbErr;
   }
+};
+
+const validateUserState = async (user, decoded) => {
   if (!user?.isActive || decoded.authState !== tokens.authState(user)) {
     throw new Error('Account or credentials changed; sign in again');
   }
-  if (user.mustChangePassword ? decoded.purpose !== 'password-change' : decoded.purpose !== 'access') {
+  const expectedPurpose = user.mustChangePassword ? 'password-change' : 'access';
+  if (decoded.purpose !== expectedPurpose) {
     throw new Error('Password replacement required; sign in again');
   }
   if (decoded.purpose === 'password-change' && !user.passwordChangeStartedAt) {
@@ -61,8 +62,9 @@ const authenticateToken = async (token, allowPasswordChange = false) => {
   if (await tokens.requiresMfa(user.role) && decoded.isMfaVerified !== true) {
     throw new Error('MFA verification required for privileged operations');
   }
+};
 
-  // 1. Verify that the session/token sessionId matches user.activeSessionId
+const validateSessionActivity = (user, decoded) => {
   if (
     (user.activeSessionId && (!decoded.sid || decoded.sid !== user.activeSessionId)) ||
     (decoded.purpose === 'access' && !user.activeSessionId)
@@ -72,17 +74,16 @@ const authenticateToken = async (token, allowPasswordChange = false) => {
     throw error;
   }
 
-  // 2. Inactivity timeout check (SESSION_TIMEOUT_MINUTES, default 30)
-  const timeoutMinutes = parseInt(process.env.SESSION_TIMEOUT_MINUTES, 10) || 30;
+  const timeoutMinutes = Number.parseInt(process.env.SESSION_TIMEOUT_MINUTES, 10) || 30;
   const timeoutMs = timeoutMinutes * 60 * 1000;
   if (user.lastActivity && (Date.now() - new Date(user.lastActivity).getTime() > timeoutMs)) {
     const error = new Error('Session timed out');
     error.statusCode = 401;
     throw error;
   }
+};
 
-  // 3. Otherwise update lastActivity to now (to keep the session alive)
-  const now = new Date();
+const touchUserActivity = async (user, now) => {
   user.lastActivity = now;
   const mongoose = require('mongoose');
   if (mongoose.connection?.readyState === 1 && User && typeof User.updateOne === 'function') {
@@ -92,6 +93,19 @@ const authenticateToken = async (token, allowPasswordChange = false) => {
       console.error('Failed to update lastActivity:', err.message);
     }
   }
+};
+
+// Shared by every mounted HTTP router and the Socket.io handshake.
+const authenticateToken = async (token, allowPasswordChange = false) => {
+  const allowedPurposes = allowPasswordChange ? ['access', 'password-change'] : 'access';
+  const decoded = tokens.verify(token, allowedPurposes);
+  const user = await fetchAuthUser(decoded.sub);
+
+  await validateUserState(user, decoded);
+  validateSessionActivity(user, decoded);
+
+  const now = new Date();
+  await touchUserActivity(user, now);
 
   return { ...decoded, id: decoded.sub, _id: decoded.sub, name: user.name, email: user.email, role: user.role, customGrants: user.customGrants };
 };
@@ -99,7 +113,7 @@ exports.authenticateToken = authenticateToken;
 
 const protectWith = (allowPasswordChange) => async (req, res, next) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!authHeader?.startsWith('Bearer ')) {
     return res.status(401).json({ success: false, message: 'Not authenticated' });
   }
   try {
@@ -133,7 +147,7 @@ exports.restrictTo = (...allowedRoles) => {
   };
 };
 
-const escapeRegExp = (s) => (typeof s === 'string' ? s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '');
+const escapeRegExp = (s) => (typeof s === 'string' ? s.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`) : '');
 
 // Team-based access control
 exports.requireTeam = (teamName) => {
@@ -201,7 +215,7 @@ const { ROLE_DEFAULT_PERMISSIONS } = require('@tbi/shared-constants/permissions'
 
 exports.requireAdminPermission = (requiredPermission) => {
   return async (req, res, next) => {
-    if (!req.user || req.user.role !== 'ADMIN') {
+    if (req.user?.role !== 'ADMIN') {
       return next();
     }
     const { customGrants } = req.user;

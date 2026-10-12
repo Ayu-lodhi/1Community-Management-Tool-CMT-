@@ -1,2 +1,1 @@
-// Add validation logic here later (e.g., using Joi or express-validator)
-module.exports = {};
+module.exports = require('../../../../api/src/modules/admin/admin.validator.js');

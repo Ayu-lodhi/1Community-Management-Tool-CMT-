@@ -6,6 +6,13 @@ const { recordPermissionAudit } = require('../../core/utils/auditLogger');
 const User = require('./admin.model');
 const { getNextUserId } = require('../../services/userId.service');
 const { sendWelcomeEmail, sendPasswordResetLinkEmail, sendProfileUpdatedEmail, sendPasswordChangedEmail, sendEmailChangedEmail } = require('../../services/email.service');
+let ROLE_DEFAULT_PERMISSIONS;
+try {
+  ({ ROLE_DEFAULT_PERMISSIONS } = require('@tbi/shared-constants/permissions'));
+} catch (err) {
+  console.error('FATAL ERROR: Failed to load @tbi/shared-constants/permissions.', err);
+  process.exit(1);
+}
 
 const generateDefaultPassword = () => {
   const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -140,7 +147,7 @@ exports.updateUser = async (id, data) => {
     }).catch((err) => console.error('Admin profile update email failed:', err.message));
   }
 
-  invalidateUserPermissions(id).catch(() => {});
+  await invalidateUserPermissions(id);
 
   return user;
 };
@@ -175,15 +182,15 @@ exports.revokeUser = async (id, reason, notes, adminId) => {
   user.mustChangePassword = true;
   await user.save();
   disconnectUserSockets(user._id);
-  invalidateUserPermissions(user._id).catch(() => {});
-  recordPermissionAudit({
+  await invalidateUserPermissions(user._id);
+  await recordPermissionAudit({
     performedBy: adminId,
     targetId: user._id,
     targetType: 'User',
     action: 'USER_ROLE_REVOKED',
     oldValue: { isActive: true, role: user.role, reason },
     newValue: { isActive: false, role: user.role },
-  }).catch(() => {});
+  });
 
   return {
     userId: user._id,
@@ -216,15 +223,15 @@ exports.reactivateUser = async (id, adminId) => {
   user.mustChangePassword = true;  // Force password change on next login
   user.tempPasswordExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   await user.save();
-  invalidateUserPermissions(user._id).catch(() => {});
-  recordPermissionAudit({
+  await invalidateUserPermissions(user._id);
+  await recordPermissionAudit({
     performedBy: adminId,
     targetId: user._id,
     targetType: 'User',
     action: 'USER_ROLE_REACTIVATED',
     oldValue: { isActive: false, role: user.role },
     newValue: { isActive: true, role: user.role },
-  }).catch(() => {});
+  });
 
   // Send welcome email with new credentials (awaited)
   try {
@@ -256,7 +263,7 @@ exports.deleteUser = async (id, adminId) => {
   if (user.role === 'SUPER_ADMIN') throw new Error('Cannot delete a Super Admin account');
   if (id.toString() === adminId?.toString()) throw new Error('You cannot delete your own account');
   await User.findByIdAndDelete(id);
-  invalidateUserPermissions(id).catch(() => {});
+  await invalidateUserPermissions(id);
   return user;
 };
 
@@ -446,10 +453,15 @@ exports.updateUserPermissions = async (targetUserId, customGrants, adminUser, ip
   const user = await User.findById(targetUserId);
   if (!user) throw new Error('User not found');
 
+  if (adminUser?.role !== 'SUPER_ADMIN') {
+    const err = new Error('Forbidden');
+    err.statusCode = 403;
+    throw err;
+  }
+
   if (user.role === 'SUPER_ADMIN') throw new Error('Cannot change permissions of a Super Admin');
   if (user.role !== 'ADMIN') throw new Error('Permissions can only be managed for ADMIN accounts');
 
-  const { ROLE_DEFAULT_PERMISSIONS } = require('@tbi/shared-constants/permissions');
   const adminDefaults = ROLE_DEFAULT_PERMISSIONS['ADMIN'] || [];
 
   let newGrants;

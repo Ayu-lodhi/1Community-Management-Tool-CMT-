@@ -8,6 +8,12 @@ let initError = null;
 
 try {
   process.env.VERCEL = '1';
+
+  // Auto-fallback to memory rate-limiting if Redis is not configured in Vercel yet
+  if (!process.env.REDIS_CACHE_URL) {
+    process.env.ALLOW_NO_REDIS = 'true';
+  }
+
   app = require('../server/server.js');
 } catch (e) {
   initError = e;
@@ -23,14 +29,23 @@ if (!cached) {
   cached = global.mongoose = { conn: null, promise: null };
 }
 
-const REQUIRED_ENV_VARS = ['MONGODB_URI', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'];
+const REQUIRED_ENV_VARS = process.env.ALLOW_NO_REDIS === 'true'
+  ? ['MONGODB_URI', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET']
+  : [
+      'MONGODB_URI',
+      'JWT_ACCESS_SECRET',
+      'JWT_REFRESH_SECRET',
+      'REDIS_CACHE_URL',
+      'REDIS_PUBSUB_URL',
+      'REDIS_QUEUE_URL'
+    ];
 
 function getMissingEnvVars() {
   return REQUIRED_ENV_VARS.filter((name) => !process.env[name]);
 }
 
 async function connectToDatabase() {
-  if (mongoose.connection && mongoose.connection.readyState === 1) {
+  if (mongoose.connection?.readyState === 1) {
     return mongoose.connection;
   }
 

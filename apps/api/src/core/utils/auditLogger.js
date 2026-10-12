@@ -89,8 +89,15 @@ async function recordPermissionAudit({
 
     return logEntry;
   } catch (err) {
-    console.error('AuditLogger error:', err.message);
-    return null;
+    const { logger } = require('./logger');
+    logger.error('AuditLogger error', {
+      metric: 'audit_write_failure',
+      error: err.message,
+      action,
+      targetId,
+      targetType
+    });
+    throw new Error('Audit log failed');
   }
 }
 

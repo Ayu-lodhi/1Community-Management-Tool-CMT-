@@ -41,7 +41,8 @@ async function recordAttendanceAudit({ action, performedBy, performedByName, tok
       });
     }
   } catch (err) {
-    logger.error('AuditLog error', { error: err.message, action });
+    logger.error('AuditLog error', { metric: 'attendance_audit_failure', error: err.message, action });
+    throw new Error('Attendance audit logging failed');
   }
 }
 

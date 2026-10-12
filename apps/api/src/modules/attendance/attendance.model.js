@@ -59,6 +59,7 @@ attendanceSchema.pre('validate', function (next) {
 attendanceSchema.index({ user: 1, date: 1 }, { unique: true });
 attendanceSchema.index({ studentId: 1, teamId: 1, date: 1 }, { sparse: true });
 attendanceSchema.index({ teamId: 1, date: 1 });
+attendanceSchema.index({ team: 1, date: 1 });
 attendanceSchema.index({ studentId: 1, date: -1 });
 
 module.exports = mongoose.model('Attendance', attendanceSchema);

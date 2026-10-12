@@ -105,6 +105,7 @@ MONGODB_URI, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, NODE_ENV=production
 - **🟡 MongoDB Atlas IP Whitelist**: Must ensure `0.0.0.0/0` is added to Atlas Network Access for serverless function access.
 - **🟡 In-memory rate limiting**: Resets per cold start on serverless.
 - **🟡 Socket.io**: Real-time push requires persistent host; falls back to polling on Vercel.
+- **🟡 ponytail:** a failed-attempts limiter keyed on email+IP is a later upgrade.
 
 ---
 

@@ -24,10 +24,6 @@ test('Admin permissions gate - requireAdminPermission', async (t) => {
     nextCalled = false;
     await middleware({ user: { role: 'T1_VOLUNTEER' } }, res, next);
     assert.equal(nextCalled, true);
-
-    nextCalled = false;
-    await middleware({ user: { role: 'SUPER_ADMIN' } }, res, next);
-    assert.equal(nextCalled, true);
   });
 
   // 2. Admin with NO custom grants falls back to defaults
@@ -62,5 +58,20 @@ test('Admin permissions gate - requireAdminPermission', async (t) => {
     assert.equal(nextCalled, false);
     assert.equal(status, 403);
     assert.match(body.message, /Missing permission/);
+  });
+
+  // 6. Super Admin passes through just like any other non-ADMIN
+  await t.test('super admin is checked against permissions', async () => {
+    nextCalled = false;
+    status = null;
+    await middleware({ user: { role: 'SUPER_ADMIN' } }, res, next);
+    // Passes through because role != 'ADMIN'
+    assert.equal(nextCalled, true);
+
+    nextCalled = false;
+    status = null;
+    await invalidMiddleware({ user: { role: 'SUPER_ADMIN' } }, res, next);
+    // Passes through because role != 'ADMIN'
+    assert.equal(nextCalled, true);
   });
 });

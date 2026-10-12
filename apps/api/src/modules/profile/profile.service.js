@@ -199,17 +199,17 @@ async function changeUserTier(caller, targetUserId, newTier, reason = '') {
 
   // Invalidate permissions and disconnect active sockets to enforce immediate effect
   disconnectUserSockets(targetUser._id);
-  invalidateUserPermissions(targetUser._id).catch(() => {});
+  await invalidateUserPermissions(targetUser._id);
 
   // Record audit log entry
-  recordPermissionAudit({
+  await recordPermissionAudit({
     performedBy: caller._id,
     targetId: targetUser._id,
     targetType: 'User',
     action: 'USER_TIER_CHANGED',
     oldValue: { tier: oldTier },
     newValue: { tier: newTier, reason },
-  }).catch(() => {});
+  });
 
   return {
     userId: targetUser._id,

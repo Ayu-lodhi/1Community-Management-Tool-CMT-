@@ -2,23 +2,60 @@
 // Distributed Redis Rate Limiter with In-Memory Fallback
 // ====================================================================
 
+const { logger } = require('../core/utils/logger');
+
 let redisCache = null;
 try {
   redisCache = require('../core/config/redis-cache.client').redisCache;
+  if (!redisCache) throw new Error('Redis cache is disabled or not configured');
 } catch (err) {
-  // In environments where REDIS_CACHE_URL is not configured (or test suites), fallback to in-memory limiters
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_NO_REDIS !== 'true') {
+    logger.error('Redis cache is required in production for rate limiting', { error: err.message });
+    throw err;
+  }
+  logger.warn('Fallback to in-memory rate limiters (Redis not configured)', { error: err.message });
 }
-const { logger } = require('../core/utils/logger');
 
 // --- In-Memory Fallback State ---
 const inMemoryRequests = new Map();
 const inMemoryUserCreateRequests = new Map();
+const inMemoryBulkImportRequests = new Map();
+const inMemoryAttendanceGenRequests = new Map();
+const inMemoryAttendanceScanRequests = new Map();
 
-const GLOBAL_WINDOW_MS = 15 * 60 * 1000; // 15 mins
+const GLOBAL_WINDOW_MS = 15 * 60 * 1000;
 const GLOBAL_MAX_REQUESTS = 500;
 
-const CREATE_USER_WINDOW_MS = 60 * 1000; // 1 min
+const CREATE_USER_WINDOW_MS = 60 * 1000;
 const CREATE_USER_MAX_REQUESTS = 5;
+
+const BULK_IMPORT_WINDOW_MS = 5 * 60 * 1000;
+const BULK_IMPORT_MAX_REQUESTS = 10;
+
+const ATTENDANCE_GENERATE_WINDOW_MS = 60 * 1000;
+const ATTENDANCE_GENERATE_MAX_REQUESTS = 10;
+
+const ATTENDANCE_SCAN_WINDOW_MS = 60 * 1000;
+const ATTENDANCE_SCAN_MAX_REQUESTS = 30;
+
+
+// Pruning interval
+setInterval(() => {
+  const now = Date.now();
+  for (const [map, window] of [
+    [inMemoryRequests, GLOBAL_WINDOW_MS],
+    [inMemoryUserCreateRequests, CREATE_USER_WINDOW_MS],
+    [inMemoryBulkImportRequests, BULK_IMPORT_WINDOW_MS],
+    [inMemoryAttendanceGenRequests, ATTENDANCE_GENERATE_WINDOW_MS],
+    [inMemoryAttendanceScanRequests, ATTENDANCE_SCAN_WINDOW_MS],
+  ]) {
+    for (const [key, record] of map.entries()) {
+      if (now > record.resetTime) {
+        map.delete(key);
+      }
+    }
+  }
+}, 60000).unref();
 
 const getClientIdentifier = (req) => {
   if (req.user?.sub) {
@@ -27,262 +64,108 @@ const getClientIdentifier = (req) => {
   return `ip:${req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown'}`;
 };
 
-// In-memory fallback for global rate limiting
-const inMemoryGlobalLimiter = (req, res, next, identifier) => {
-  const now = Date.now();
-  const record = inMemoryRequests.get(identifier) || { count: 0, resetTime: now + GLOBAL_WINDOW_MS };
-
-  if (now > record.resetTime) {
-    record.count = 1;
-    record.resetTime = now + GLOBAL_WINDOW_MS;
-  } else {
-    record.count++;
-  }
-
-  inMemoryRequests.set(identifier, record);
-
-  res.setHeader('X-RateLimit-Limit', GLOBAL_MAX_REQUESTS);
-  res.setHeader('X-RateLimit-Remaining', Math.max(0, GLOBAL_MAX_REQUESTS - record.count));
-  res.setHeader('X-RateLimit-Reset', Math.ceil(record.resetTime / 1000));
-
-  if (record.count > GLOBAL_MAX_REQUESTS) {
-    return res.status(429).json({
-      success: false,
-      message: 'Too many requests, please try again later.',
-    });
-  }
-
-  next();
-};
-
-// In-memory fallback for user creation rate limiting
-const inMemoryCreateUserLimiter = (req, res, next, identifier) => {
-  const now = Date.now();
-  const record = inMemoryUserCreateRequests.get(identifier) || { count: 0, resetTime: now + CREATE_USER_WINDOW_MS };
-
-  if (now > record.resetTime) {
-    record.count = 1;
-    record.resetTime = now + CREATE_USER_WINDOW_MS;
-  } else {
-    record.count++;
-  }
-
-  inMemoryUserCreateRequests.set(identifier, record);
-
-  if (record.count > CREATE_USER_MAX_REQUESTS) {
-    return res.status(429).json({
-      success: false,
-      message: 'Too many user creation requests, please try again later.',
-    });
-  }
-
-  next();
-};
-
-exports.globalLimiter = async (req, res, next) => {
-  const identifier = getClientIdentifier(req);
-  const redisKey = `rl:global:${identifier}`;
-
+const handleRedisLimiter = async (req, res, next, redisKey, windowMs, maxRequests, fallbackFn, identifier, errorMsg) => {
   try {
     if (redisCache && redisCache.status === 'ready') {
-      const results = await redisCache
-        .multi()
-        .incr(redisKey)
-        .pttl(redisKey)
-        .exec();
-
+      const results = await redisCache.multi().incr(redisKey).pttl(redisKey).exec();
       if (results && results[0] && !results[0][0]) {
         const count = results[0][1];
         let ttl = results[1] ? results[1][1] : -1;
 
         if (ttl === -1 || count === 1) {
-          await redisCache.pexpire(redisKey, GLOBAL_WINDOW_MS);
-          ttl = GLOBAL_WINDOW_MS;
+          await redisCache.pexpire(redisKey, windowMs);
+          ttl = windowMs;
         }
 
         const resetTimestamp = Math.ceil((Date.now() + Math.max(0, ttl)) / 1000);
-        res.setHeader('X-RateLimit-Limit', GLOBAL_MAX_REQUESTS);
-        res.setHeader('X-RateLimit-Remaining', Math.max(0, GLOBAL_MAX_REQUESTS - count));
-        res.setHeader('X-RateLimit-Reset', resetTimestamp);
-
-        if (count > GLOBAL_MAX_REQUESTS) {
-          return res.status(429).json({
-            success: false,
-            message: 'Too many requests, please try again later.',
-          });
+        if (typeof res.setHeader === 'function') {
+          res.setHeader('X-RateLimit-Limit', maxRequests);
+          res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - count));
+          res.setHeader('X-RateLimit-Reset', resetTimestamp);
         }
 
+        if (count > maxRequests) {
+          return res.status(429).json({ success: false, message: errorMsg });
+        }
         return next();
       }
     }
   } catch (err) {
-    logger.warn('Redis rate limiter failed; falling back to in-memory limiter', { error: err.message });
-  }
-
-  // Fallback to in-memory limiter if Redis is unavailable or failed
-  return inMemoryGlobalLimiter(req, res, next, identifier);
-};
-
-exports.createUserLimiter = async (req, res, next) => {
-  const identifier = getClientIdentifier(req);
-  const redisKey = `rl:create_user:${identifier}`;
-
-  try {
-    if (redisCache && redisCache.status === 'ready') {
-      const results = await redisCache
-        .multi()
-        .incr(redisKey)
-        .pttl(redisKey)
-        .exec();
-
-      if (results && results[0] && !results[0][0]) {
-        const count = results[0][1];
-        let ttl = results[1] ? results[1][1] : -1;
-
-        if (ttl === -1 || count === 1) {
-          await redisCache.pexpire(redisKey, CREATE_USER_WINDOW_MS);
-          ttl = CREATE_USER_WINDOW_MS;
-        }
-
-        if (count > CREATE_USER_MAX_REQUESTS) {
-          return res.status(429).json({
-            success: false,
-            message: 'Too many user creation requests, please try again later.',
-          });
-        }
-
-        return next();
-      }
+    if (process.env.NODE_ENV === 'production') {
+      logger.error(`Redis limiter failed for ${redisKey}, cannot fallback to memory in production`, { error: err.message });
+      return res.status(500).json({ success: false, message: 'Rate limiter unavailable' });
     }
-  } catch (err) {
-    logger.warn('Redis user-create limiter failed; falling back to in-memory limiter', { error: err.message });
+    logger.warn(`Redis limiter failed for ${redisKey}; falling back to memory`, { error: err.message });
   }
 
-  return inMemoryCreateUserLimiter(req, res, next, identifier);
+  if (process.env.NODE_ENV === 'production') {
+    logger.error(`Redis is not ready for ${redisKey}, cannot fallback to memory in production`);
+    return res.status(500).json({ success: false, message: 'Rate limiter unavailable' });
+  }
+
+  return fallbackFn(req, res, next, identifier);
 };
 
-// --- In-Memory Bulk Import Limiter State ---
-const inMemoryBulkImportRequests = new Map();
-const BULK_IMPORT_WINDOW_MS = 5 * 60 * 1000; // 5 mins
-const BULK_IMPORT_MAX_REQUESTS = 10;
-
-const inMemoryBulkImportLimiter = (req, res, next, identifier) => {
+const handleMemoryLimiter = (req, res, next, map, windowMs, maxRequests, identifier, errorMsg) => {
   const now = Date.now();
-  const record = inMemoryBulkImportRequests.get(identifier) || { count: 0, resetTime: now + BULK_IMPORT_WINDOW_MS };
+  const record = map.get(identifier) || { count: 0, resetTime: now + windowMs };
 
   if (now > record.resetTime) {
     record.count = 1;
-    record.resetTime = now + BULK_IMPORT_WINDOW_MS;
+    record.resetTime = now + windowMs;
   } else {
     record.count++;
   }
 
-  inMemoryBulkImportRequests.set(identifier, record);
+  map.set(identifier, record);
 
-  if (record.count > BULK_IMPORT_MAX_REQUESTS) {
-    return res.status(429).json({
-      success: false,
-      message: 'Too many bulk import requests, please try again later.',
-    });
+  if (typeof res.setHeader === 'function') {
+    res.setHeader('X-RateLimit-Limit', maxRequests);
+    res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - record.count));
+    res.setHeader('X-RateLimit-Reset', Math.ceil(record.resetTime / 1000));
   }
 
+  if (record.count > maxRequests) {
+    return res.status(429).json({ success: false, message: errorMsg });
+  }
   next();
 };
 
-exports.bulkImportLimiter = async (req, res, next) => {
+exports.globalLimiter = (req, res, next) => {
   const identifier = getClientIdentifier(req);
-  const redisKey = `rl:bulk_import:${identifier}`;
-
-  try {
-    if (redisCache && redisCache.status === 'ready') {
-      const results = await redisCache
-        .multi()
-        .incr(redisKey)
-        .pttl(redisKey)
-        .exec();
-
-      if (results && results[0] && !results[0][0]) {
-        const count = results[0][1];
-        let ttl = results[1] ? results[1][1] : -1;
-
-        if (ttl === -1 || count === 1) {
-          await redisCache.pexpire(redisKey, BULK_IMPORT_WINDOW_MS);
-          ttl = BULK_IMPORT_WINDOW_MS;
-        }
-
-        if (count > BULK_IMPORT_MAX_REQUESTS) {
-          return res.status(429).json({
-            success: false,
-            message: 'Too many bulk import requests, please try again later.',
-          });
-        }
-
-        return next();
-      }
-    }
-  } catch (err) {
-    logger.warn('Redis bulk import limiter failed; falling back to in-memory limiter', { error: err.message });
-  }
-
-  return inMemoryBulkImportLimiter(req, res, next, identifier);
+  return handleRedisLimiter(req, res, next, `rl:global:${identifier}`, GLOBAL_WINDOW_MS, GLOBAL_MAX_REQUESTS,
+    (rq, rs, nx, id) => handleMemoryLimiter(rq, rs, nx, inMemoryRequests, GLOBAL_WINDOW_MS, GLOBAL_MAX_REQUESTS, id, 'Too many requests, please try again later.'),
+    identifier, 'Too many requests, please try again later.');
 };
 
-const ATTENDANCE_GENERATE_WINDOW_MS = 60 * 1000;
-const ATTENDANCE_GENERATE_MAX_REQUESTS = 10;
-const ATTENDANCE_SCAN_WINDOW_MS = 60 * 1000;
-const ATTENDANCE_SCAN_MAX_REQUESTS = 30;
+exports.createUserLimiter = (req, res, next) => {
+  const identifier = getClientIdentifier(req);
+  return handleRedisLimiter(req, res, next, `rl:create_user:${identifier}`, CREATE_USER_WINDOW_MS, CREATE_USER_MAX_REQUESTS,
+    (rq, rs, nx, id) => handleMemoryLimiter(rq, rs, nx, inMemoryUserCreateRequests, CREATE_USER_WINDOW_MS, CREATE_USER_MAX_REQUESTS, id, 'Too many user creation requests, please try again later.'),
+    identifier, 'Too many user creation requests, please try again later.');
+};
 
-const inMemoryAttendanceGenRequests = new Map();
-const inMemoryAttendanceScanRequests = new Map();
+exports.bulkImportLimiter = (req, res, next) => {
+  const identifier = getClientIdentifier(req);
+  return handleRedisLimiter(req, res, next, `rl:bulk_import:${identifier}`, BULK_IMPORT_WINDOW_MS, BULK_IMPORT_MAX_REQUESTS,
+    (rq, rs, nx, id) => handleMemoryLimiter(rq, rs, nx, inMemoryBulkImportRequests, BULK_IMPORT_WINDOW_MS, BULK_IMPORT_MAX_REQUESTS, id, 'Too many bulk import requests, please try again later.'),
+    identifier, 'Too many bulk import requests, please try again later.');
+};
 
 exports.attendanceGenerateLimiter = (req, res, next) => {
   const identifier = (req.user?.sub || req.user?._id || req.user?.id || getClientIdentifier(req) || 'unknown').toString();
-  const now = Date.now();
-  const record = inMemoryAttendanceGenRequests.get(identifier) || { count: 0, resetTime: now + ATTENDANCE_GENERATE_WINDOW_MS };
-
-  if (now > record.resetTime) {
-    record.count = 1;
-    record.resetTime = now + ATTENDANCE_GENERATE_WINDOW_MS;
-  } else {
-    record.count++;
-  }
-
-  inMemoryAttendanceGenRequests.set(identifier, record);
-
-  if (record.count > ATTENDANCE_GENERATE_MAX_REQUESTS) {
-    return res.status(429).json({
-      success: false,
-      message: 'Too many session generation requests, please try again later.',
-    });
-  }
-
-  next();
+  return handleRedisLimiter(req, res, next, `rl:attendance_gen:${identifier}`, ATTENDANCE_GENERATE_WINDOW_MS, ATTENDANCE_GENERATE_MAX_REQUESTS,
+    (rq, rs, nx, id) => handleMemoryLimiter(rq, rs, nx, inMemoryAttendanceGenRequests, ATTENDANCE_GENERATE_WINDOW_MS, ATTENDANCE_GENERATE_MAX_REQUESTS, id, 'Too many session generation requests, please try again later.'),
+    identifier, 'Too many session generation requests, please try again later.');
 };
 
 exports.attendanceScanLimiter = (req, res, next) => {
-  // Key by authenticated user ID so a whole class of students scanning from one campus Wi-Fi IP is not throttled together
   const identifier = (req.user?.sub || req.user?._id || req.user?.id || getClientIdentifier(req) || 'unknown').toString();
-  const now = Date.now();
-  const record = inMemoryAttendanceScanRequests.get(identifier) || { count: 0, resetTime: now + ATTENDANCE_SCAN_WINDOW_MS };
-
-  if (now > record.resetTime) {
-    record.count = 1;
-    record.resetTime = now + ATTENDANCE_SCAN_WINDOW_MS;
-  } else {
-    record.count++;
-  }
-
-  inMemoryAttendanceScanRequests.set(identifier, record);
-
-  if (record.count > ATTENDANCE_SCAN_MAX_REQUESTS) {
-    return res.status(429).json({
-      success: false,
-      message: 'Too many attendance submissions, please try again later.',
-    });
-  }
-
-  next();
+  return handleRedisLimiter(req, res, next, `rl:attendance_scan:${identifier}`, ATTENDANCE_SCAN_WINDOW_MS, ATTENDANCE_SCAN_MAX_REQUESTS,
+    (rq, rs, nx, id) => handleMemoryLimiter(rq, rs, nx, inMemoryAttendanceScanRequests, ATTENDANCE_SCAN_WINDOW_MS, ATTENDANCE_SCAN_MAX_REQUESTS, id, 'Too many attendance submissions, please try again later.'),
+    identifier, 'Too many attendance submissions, please try again later.');
 };
+
 
 exports._inMemoryAttendanceGenRequests = inMemoryAttendanceGenRequests;
 exports._inMemoryAttendanceScanRequests = inMemoryAttendanceScanRequests;

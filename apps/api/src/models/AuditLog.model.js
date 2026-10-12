@@ -11,4 +11,4 @@ const auditLogSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now },
 });
 
-module.exports = mongoose.model('AuditLog', auditLogSchema);
+module.exports = mongoose.models.AuditLog || mongoose.model('AuditLog', auditLogSchema);

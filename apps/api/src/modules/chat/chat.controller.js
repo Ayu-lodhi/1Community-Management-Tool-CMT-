@@ -73,7 +73,7 @@ const validateActionUrl = (url) => {
     const host = parsed.hostname.toLowerCase();
     const isLocalhost = host === 'localhost' || host === '127.0.0.1';
     if (parsed.protocol === 'https:' || (isLocalhost && parsed.protocol === 'http:')) {
-      if (allowedHosts.has(host) || host.endsWith('.vercel.app')) {
+      if (allowedHosts.has(host)) {
         return trimmed;
       }
     }

@@ -9,6 +9,9 @@ if (!process.env.JWT_REFRESH_SECRET) {
 if (!process.env.JWT_SECRET) {
   process.env.JWT_SECRET = process.env.JWT_ACCESS_SECRET;
 }
+if (!process.env.REDIS_CACHE_URL) {
+  process.env.REDIS_CACHE_URL = 'redis://localhost:6379';
+}
 
 try {
   const mongoose = require('mongoose');

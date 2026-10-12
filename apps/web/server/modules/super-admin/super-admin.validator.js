@@ -1,6 +1,1 @@
-import { ValidationError } from '../../core/errors/typedErrors.js';
-
-export function validateSuper_adminInput(req, res, next) {
-  // Input validation logic
-  next();
-}
+module.exports = require('../../../../api/src/modules/super-admin/super-admin.validator.js');

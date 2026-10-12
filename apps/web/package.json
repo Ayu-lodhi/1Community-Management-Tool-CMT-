@@ -33,6 +33,10 @@
     "otplib": "13.5.0",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.3",
+    "bullmq": "^5.0.0",
+    "@bull-board/api": "^5.21.3",
+    "@bull-board/express": "^5.21.3",
+    "compression": "^1.8.2",
     "ioredis": "^6.0.0"
   },
   "devDependencies": {
