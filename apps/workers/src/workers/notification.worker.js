@@ -1,7 +1,7 @@
 import { Worker } from 'bullmq';
 import Redis from 'ioredis';
 import nodemailer from 'nodemailer';
-import { checkAndSetIdempotencyKey } from '../utils/idempotency.util.js';
+import { checkAndSetIdempotencyKey } from '@tbi/shared-utils';
 
 const REDIS_QUEUE_URL = process.env.REDIS_QUEUE_URL || 'redis://localhost:6381/2';
 

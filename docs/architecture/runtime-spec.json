@@ -1,0 +1,504 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "TBI Platform Runtime Architecture",
+    "output": "docs/architecture/tbi-runtime.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Ayu-lodhi/employee-manager-.git",
+      "provider": "github",
+      "revision": "b98d0a722b833a31dc3673b6905376b17ea8b95b"
+    }
+  },
+  "components": [
+    {
+      "id": "web_client",
+      "type": "frontend",
+      "label": "Web Client SPA",
+      "sublabel": "React 18 / Vite SPA",
+      "tag": "User Interface",
+      "pos": [40, 160],
+      "size": [130, 64],
+      "sources": [
+        {
+          "path": "apps/web/src/api.js",
+          "line": 1,
+          "end_line": 60,
+          "label": "API Client & Interceptor"
+        }
+      ]
+    },
+    {
+      "id": "security_ingress",
+      "type": "security",
+      "label": "Security & Ingress",
+      "sublabel": "CORS, Headers & Limits",
+      "tag": "Rate Limiter & Headers",
+      "pos": [270, 250],
+      "size": [140, 64],
+      "sources": [
+        {
+          "path": "apps/api/src/middleware/security.middleware.js",
+          "line": 1,
+          "end_line": 11,
+          "label": "Security Headers"
+        },
+        {
+          "path": "apps/api/src/middleware/rateLimit.middleware.js",
+          "line": 6,
+          "end_line": 40,
+          "label": "Global Redis Rate Limiter"
+        }
+      ]
+    },
+    {
+      "id": "socket_gateway",
+      "type": "backend",
+      "label": "Socket.io Gateway",
+      "sublabel": "Embedded in Express Server",
+      "tag": "In-Process Gateway",
+      "pos": [270, 70],
+      "size": [140, 64],
+      "sources": [
+        {
+          "path": "apps/api/src/config/socket.js",
+          "line": 51,
+          "end_line": 140,
+          "label": "Socket.io Handshake"
+        },
+        {
+          "path": "apps/api/src/server.js",
+          "line": 75,
+          "end_line": 98,
+          "label": "Server Process Attachment"
+        }
+      ]
+    },
+    {
+      "id": "redis_pubsub",
+      "type": "messagebus",
+      "label": "Redis Pub/Sub",
+      "sublabel": "Instance 2 (:6380)",
+      "tag": "Chat Adapter",
+      "pos": [505, 70],
+      "size": [140, 64],
+      "sources": [
+        {
+          "path": "apps/api/src/core/config/redis-pubsub.client.js",
+          "line": 1,
+          "end_line": 14,
+          "label": "Redis Pub/Sub Client"
+        }
+      ]
+    },
+    {
+      "id": "auth_guard",
+      "type": "security",
+      "label": "Auth & RBAC Guard",
+      "sublabel": "JWT, Session & MFA",
+      "tag": "Access Control",
+      "pos": [505, 250],
+      "size": [140, 64],
+      "sources": [
+        {
+          "path": "apps/api/src/modules/auth/auth.middleware.js",
+          "line": 6,
+          "end_line": 51,
+          "label": "JWT & Session Auth"
+        },
+        {
+          "path": "apps/api/src/core/middleware/rbac.middleware.js",
+          "line": 1,
+          "end_line": 55,
+          "label": "RBAC & Cached Grants"
+        }
+      ]
+    },
+    {
+      "id": "redis_cache",
+      "type": "database",
+      "label": "Redis Cache",
+      "sublabel": "Instance 1 (:6379)",
+      "tag": "Perms & Blacklist",
+      "pos": [505, 430],
+      "size": [140, 64],
+      "sources": [
+        {
+          "path": "apps/api/src/core/config/redis-cache.client.js",
+          "line": 1,
+          "end_line": 15,
+          "label": "Redis Cache Client"
+        },
+        {
+          "path": "apps/api/src/core/cache/permissionCache.js",
+          "line": 1,
+          "end_line": 40,
+          "label": "Permission Caching"
+        },
+        {
+          "path": "apps/api/src/core/session/sessionTerminator.js",
+          "line": 5,
+          "end_line": 25,
+          "label": "Session Termination"
+        }
+      ]
+    },
+    {
+      "id": "redis_queue",
+      "type": "messagebus",
+      "label": "Redis BullMQ Queue",
+      "sublabel": "Instance 3 (:6381)",
+      "tag": "Job Queue",
+      "pos": [740, 70],
+      "size": [140, 64],
+      "sources": [
+        {
+          "path": "apps/api/src/core/config/redis-queue.client.js",
+          "line": 1,
+          "end_line": 15,
+          "label": "Redis Queue Client"
+        },
+        {
+          "path": "apps/api/src/core/queues/queue.service.js",
+          "line": 1,
+          "end_line": 60,
+          "label": "BullMQ Queues"
+        }
+      ]
+    },
+    {
+      "id": "api_server",
+      "type": "backend",
+      "label": "Express API Server",
+      "sublabel": "Single Node.js Process",
+      "tag": "HTTP & WS Server",
+      "pos": [740, 250],
+      "size": [140, 64],
+      "sources": [
+        {
+          "path": "apps/api/src/server.js",
+          "line": 45,
+          "end_line": 80,
+          "label": "Express Router Mounting"
+        }
+      ]
+    },
+    {
+      "id": "bg_workers",
+      "type": "backend",
+      "label": "BullMQ Workers",
+      "sublabel": "Notifications & Certs",
+      "tag": "Idempotent Workers",
+      "pos": [975, 70],
+      "size": [140, 64],
+      "sources": [
+        {
+          "path": "apps/workers/src/index.js",
+          "line": 1,
+          "end_line": 25,
+          "label": "BullMQ Worker Runtime"
+        },
+        {
+          "path": "apps/workers/src/workers/notification.worker.js",
+          "line": 1,
+          "end_line": 50,
+          "label": "Notification Worker"
+        },
+        {
+          "path": "apps/workers/src/workers/certificate.worker.js",
+          "line": 1,
+          "end_line": 50,
+          "label": "Certificate PDF Worker"
+        }
+      ]
+    },
+    {
+      "id": "domain_services",
+      "type": "backend",
+      "label": "Domain Services",
+      "sublabel": "Apps, Events, Reviews, Certs",
+      "tag": "Business Engine",
+      "pos": [975, 250],
+      "size": [140, 64],
+      "sources": [
+        {
+          "path": "apps/api/src/modules/applications/applications.service.js",
+          "line": 1,
+          "end_line": 30,
+          "label": "Applications Service"
+        },
+        {
+          "path": "apps/api/src/modules/events/events.routes.js",
+          "line": 1,
+          "end_line": 25,
+          "label": "Events Routes"
+        },
+        {
+          "path": "apps/api/src/modules/certificates/certificates.service.js",
+          "line": 1,
+          "end_line": 14,
+          "label": "Certificates Service"
+        }
+      ]
+    },
+    {
+      "id": "email_service",
+      "type": "external",
+      "label": "Email Transport",
+      "sublabel": "External SMTP (Nodemailer)",
+      "tag": "External SMTP",
+      "pos": [1210, 70],
+      "size": [140, 64],
+      "sources": [
+        {
+          "path": "apps/api/src/services/email.service.js",
+          "line": 21,
+          "end_line": 48,
+          "label": "SMTP Transport"
+        }
+      ]
+    },
+    {
+      "id": "base_repo",
+      "type": "backend",
+      "label": "Base Repository",
+      "sublabel": "Mongoose ODM Layer",
+      "tag": "Data Access",
+      "pos": [1210, 250],
+      "size": [140, 64],
+      "sources": [
+        {
+          "path": "apps/api/src/core/BaseRepository.js",
+          "line": 10,
+          "end_line": 60,
+          "label": "CRUD & Query Abstraction"
+        }
+      ]
+    },
+    {
+      "id": "mongodb",
+      "type": "database",
+      "label": "MongoDB Atlas",
+      "sublabel": "Cloud Replica Set (rs0)",
+      "tag": "Document Store",
+      "pos": [1445, 250],
+      "size": [140, 64],
+      "sources": [
+        {
+          "path": "apps/api/src/core/database/connection.js",
+          "line": 1,
+          "end_line": 15,
+          "label": "Mongoose Connection"
+        },
+        {
+          "path": "apps/api/src/server.js",
+          "line": 75,
+          "end_line": 95,
+          "label": "Atlas Connection URI"
+        },
+        {
+          "path": "docker-compose.yml",
+          "line": 4,
+          "end_line": 16,
+          "label": "Local Docker rs0 Replica Set"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "TBI Platform Backend & Persistence Services",
+      "wraps": [
+        "security_ingress",
+        "socket_gateway",
+        "redis_pubsub",
+        "auth_guard",
+        "redis_cache",
+        "api_server",
+        "redis_queue",
+        "bg_workers",
+        "domain_services",
+        "base_repo"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "Ingress Security Perimeter",
+      "wraps": [
+        "security_ingress",
+        "auth_guard"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "web-to-ingress",
+      "from": "web_client",
+      "to": "security_ingress",
+      "label": "HTTPS REST",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "web-to-socket",
+      "from": "web_client",
+      "to": "socket_gateway",
+      "label": "WSS / WS",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "ingress-to-auth",
+      "from": "security_ingress",
+      "to": "auth_guard",
+      "label": "Sanitized",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "socket-to-auth",
+      "from": "socket_gateway",
+      "to": "auth_guard",
+      "label": "JWT Verify",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "socket-to-pubsub",
+      "from": "socket_gateway",
+      "to": "redis_pubsub",
+      "label": "Pub/Sub",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "auth-to-cache",
+      "from": "auth_guard",
+      "to": "redis_cache",
+      "label": "Session Revoke",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "auth-to-api",
+      "from": "auth_guard",
+      "to": "api_server",
+      "label": "Session Ok",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "api-to-queue",
+      "from": "api_server",
+      "to": "redis_queue",
+      "label": "Enqueue",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "queue-to-workers",
+      "from": "redis_queue",
+      "to": "bg_workers",
+      "label": "Drains",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "api-to-domain",
+      "from": "api_server",
+      "to": "domain_services",
+      "label": "Dispatch",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "domain-to-cache",
+      "from": "domain_services",
+      "to": "redis_cache",
+      "label": "Perm Cache / Revoke",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "right"
+    },
+    {
+      "id": "workers-to-email",
+      "from": "bg_workers",
+      "to": "email_service",
+      "label": "SMTP Mail",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "workers-to-mongo",
+      "from": "bg_workers",
+      "to": "mongodb",
+      "label": "Doc Reads/Writes",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "domain-to-repo",
+      "from": "domain_services",
+      "to": "base_repo",
+      "label": "CRUD / Txn",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "repo-to-mongo",
+      "from": "base_repo",
+      "to": "mongodb",
+      "label": "Queries",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Client & Edge Security",
+      "items": [
+        "Vite React 18 SPA communicates over HTTPS REST and authenticated WebSockets",
+        "Security headers (HSTS, CSP, XSS) and Redis rate limiter shield ingress routes",
+        "Short-lived JWTs combined with per-user active session tracking enforce fast revocation"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Modular Monolith Core",
+      "items": [
+        "Express API and Socket.io co-located in a single Node.js runtime process",
+        "Socket.io gateway verifies JWT auth and applies per-user event rate limiting",
+        "Granular RBAC checks role defaults and per-user custom ACCESS_GRANT overrides with Redis caching"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Tri-Concern Redis Architecture",
+      "items": [
+        "Dedicated Redis Instance 1 (:6379) manages session blacklists, user activity and write-path cache",
+        "Dedicated Redis Instance 2 (:6380) serves as Socket.io pub/sub adapter across nodes",
+        "Dedicated Redis Instance 3 (:6381) powers BullMQ distributed job queues with idempotency keys"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Data Persistence & Cloud Services",
+      "items": [
+        "MongoDB Atlas cloud replica set (with local Docker rs0 fallback) provides document persistence",
+        "BaseRepository encapsulates Mongoose queries with lean, projection, and pagination",
+        "BullMQ workers process async email delivery via external SMTP and generate PDF certificates"
+      ]
+    }
+  ]
+}

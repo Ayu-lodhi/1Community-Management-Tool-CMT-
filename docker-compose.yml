@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: tbi_mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "rs.status().ok || rs.initiate().ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-cache:
+    image: redis:7.2-alpine
+    container_name: tbi_redis_cache
+    ports:
+      - "6379:6379"
+
+  redis-pubsub:
+    image: redis:7.2-alpine
+    container_name: tbi_redis_pubsub
+    ports:
+      - "6380:6379"
+
+  redis-queue:
+    image: redis:7.2-alpine
+    container_name: tbi_redis_queue
+    ports:
+      - "6381:6379"
+
+volumes:
+  mongo_data:
