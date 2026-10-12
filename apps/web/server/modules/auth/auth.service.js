@@ -83,10 +83,10 @@ const acquireSession = async (userId) => {
   return { updatedUser, sessionId };
 };
 
-exports.login = async (email, password) => {
-  if (typeof email !== 'string' || typeof password !== 'string') throw new Error('Invalid credentials');
+exports.login = async (identifier, password) => {
+  if (typeof identifier !== 'string' || typeof password !== 'string') throw new Error('Invalid credentials');
   await ensureDbConnected();
-  let user = await repository.findByEmail(email);
+  let user = await repository.findByIdentifier(identifier);
   if (!user) throw new Error('Invalid credentials');
   if (!user.isActive) throw new Error('Account is deactivated');
 
