@@ -87,7 +87,7 @@ const sendEmail = async ({ to, subject, html, text }) => {
 // ====================================================================
 // WELCOME EMAIL TEMPLATE — Sent when Admin creates a user
 // ====================================================================
-const sendWelcomeEmail = async ({ to, name, role, tempPassword, loginUrl }) => {
+const sendWelcomeEmail = async ({ to, name, role, tempPassword, loginUrl, userId }) => {
   const tierLabel = {
     T1_VOLUNTEER: 'T1 Volunteer',
     T2_ASSOCIATE: 'T2 Associate',
@@ -108,7 +108,7 @@ const sendWelcomeEmail = async ({ to, name, role, tempPassword, loginUrl }) => {
         <tr>
           <td align="center">
             <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
-              
+
               <!-- Header -->
               <tr>
                 <td style="background:linear-gradient(135deg,#0EA5E9,#6366F1);padding:40px 40px 32px;text-align:center;">
@@ -116,7 +116,7 @@ const sendWelcomeEmail = async ({ to, name, role, tempPassword, loginUrl }) => {
                   <p style="margin:0;color:rgba(255,255,255,0.9);font-size:15px;">Your account has been created</p>
                 </td>
               </tr>
-              
+
               <!-- Body -->
               <tr>
                 <td style="padding:40px;">
@@ -124,10 +124,10 @@ const sendWelcomeEmail = async ({ to, name, role, tempPassword, loginUrl }) => {
                     Hi <strong>${escapeHtml(name)}</strong>,
                   </p>
                   <p style="margin:0 0 24px;font-size:15px;color:#4b5563;line-height:1.6;">
-                    An administrator has created an account for you on the TBI Workforce Platform. 
-                    Your role is: <strong style="color:#0EA5E9;">${tierLabel}</strong>
+                    An administrator has created an account for you on the TBI Workforce Platform.
+                    Your role is: <strong style="color:#0EA5E9;">${escapeHtml(tierLabel)}</strong>
                   </p>
-                  
+
                   <!-- Credentials Box -->
                   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:24px;">
                     <tr>
@@ -135,56 +135,64 @@ const sendWelcomeEmail = async ({ to, name, role, tempPassword, loginUrl }) => {
                         <p style="margin:0 0 16px;font-size:13px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">
                           Your Login Credentials
                         </p>
-                        
+
                         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                          ${userId ? `<tr>
+                            <td style="padding:8px 0;font-size:14px;color:#6b7280;width:120px;">User ID</td>
+                            <td style="padding:8px 0;font-size:14px;color:#111827;font-weight:700;font-family:'Courier New',monospace;letter-spacing:1px;">${escapeHtml(userId)}</td>
+                          </tr>` : ''}
                           <tr>
                             <td style="padding:8px 0;font-size:14px;color:#6b7280;width:120px;">Email</td>
-                            <td style="padding:8px 0;font-size:14px;color:#111827;font-weight:600;">${to}</td>
+                            <td style="padding:8px 0;font-size:14px;color:#111827;font-weight:600;">${escapeHtml(to)}</td>
                           </tr>
                           <tr>
                             <td style="padding:8px 0;font-size:14px;color:#6b7280;">Temp Password</td>
                             <td style="padding:8px 0;font-size:16px;color:#111827;font-weight:700;font-family:'Courier New',monospace;letter-spacing:1px;">
-                              ${tempPassword}
+                              ${escapeHtml(tempPassword)}
                             </td>
+                          </tr>
+                          <tr>
+                            <td style="padding:8px 0;font-size:14px;color:#6b7280;">Validity</td>
+                            <td style="padding:8px 0;font-size:14px;color:#d97706;font-weight:600;">7 days</td>
                           </tr>
                         </table>
                       </td>
                     </tr>
                   </table>
-                  
+
                   <!-- Warning -->
                   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fef3c7;border-left:4px solid #f59e0b;border-radius:6px;margin-bottom:24px;">
                     <tr>
                       <td style="padding:16px;">
                         <p style="margin:0 0 6px;font-size:14px;font-weight:600;color:#92400e;">
-                          Important — One-Time Use
+                          Important — Temporary Credentials
                         </p>
                         <p style="margin:0;font-size:13px;color:#78350f;line-height:1.5;">
-                          This password can only be used <strong>once</strong>. You will be required to 
+                          This temporary password expires in <strong>7 days</strong> and can only be used <strong>once</strong>. You will be required to
                           set a new password immediately after your first login. Do not share these credentials with anyone.
                         </p>
                       </td>
                     </tr>
                   </table>
-                  
+
                   <!-- CTA -->
                   <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                     <tr>
                       <td align="center" style="padding:8px 0 32px;">
-                        <a href="${loginUrl}" style="display:inline-block;background:#0EA5E9;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:8px;font-size:15px;font-weight:600;">
+                        <a href="${escapeHtml(loginUrl)}" style="display:inline-block;background:#0EA5E9;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:8px;font-size:15px;font-weight:600;">
                           Sign In to Platform
                         </a>
                       </td>
                     </tr>
                   </table>
-                  
+
                   <p style="margin:0;font-size:13px;color:#6b7280;line-height:1.6;">
-                    If you did not expect this email or believe it was sent in error, please contact 
+                    If you did not expect this email or believe it was sent in error, please contact
                     your TBI administrator immediately.
                   </p>
                 </td>
               </tr>
-              
+
               <!-- Footer -->
               <tr>
                 <td style="background:#f9fafb;padding:24px 40px;border-top:1px solid #e5e7eb;">
@@ -208,15 +216,16 @@ Your account has been created on the TBI Workforce Platform.
 Role: ${tierLabel}
 
 Login Credentials:
-  Email: ${to}
+${userId ? `  User ID: ${userId}\n` : ''}  Email: ${to}
   Temp Password: ${tempPassword}
+  Validity: 7 days
 
-IMPORTANT: This password is one-time use only. You will be required to set a new password on first login.
+IMPORTANT: This temporary password expires in 7 days and can only be used once. You will be required to set a new password on first login.
 
 Sign in here: ${loginUrl}
 
 If you did not expect this email, contact your TBI administrator.
-  `;
+  `.trim();
 
   return await sendEmail({
     to,

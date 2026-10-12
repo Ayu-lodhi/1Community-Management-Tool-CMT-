@@ -34,6 +34,7 @@ exports.createUser = async (data, callerRole = null) => {
   const tempPassword = generateDefaultPassword();
   const hashedPassword = await bcrypt.hash(tempPassword, 12);
   const userId = (data.userId || await getNextUserId()).toUpperCase();
+  const tempPasswordExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   const user = await User.create({
     userId,
@@ -43,21 +44,30 @@ exports.createUser = async (data, callerRole = null) => {
     role: data.role || 'T1_VOLUNTEER',
     password: hashedPassword,
     mustChangePassword: true,
+    tempPasswordExpiresAt,
     isActive: true,
   });
 
-  // Send welcome email (fire and forget)
-  sendWelcomeEmail({
-    to: user.email,
-    name: user.name,
-    role: user.role,
-    tempPassword,
-    loginUrl: LOGIN_URL,
-  }).catch((err) => console.error('Welcome email failed:', err.message));
+  // Send welcome email (awaited for serverless reliability)
+  let emailDelivery = { sent: false };
+  try {
+    const emailResult = await sendWelcomeEmail({
+      to: user.email,
+      name: user.name,
+      role: user.role,
+      tempPassword,
+      loginUrl: LOGIN_URL,
+      userId: user.userId,
+    });
+    emailDelivery = { sent: emailResult?.success !== false, error: emailResult?.error || null };
+  } catch (err) {
+    console.error('Welcome email failed:', err.message);
+    emailDelivery = { sent: false, error: err.message };
+  }
 
   const userObj = user.toObject ? user.toObject({ virtuals: false }) : { ...user };
   delete userObj.password;
-  return { user: userObj, tempPassword };
+  return { user: userObj, tempPassword, emailDelivery };
 };
 
 exports.bulkCreateUsers = async (rows, callerRole = null) => {
@@ -204,6 +214,7 @@ exports.reactivateUser = async (id, adminId) => {
   user.password = await bcrypt.hash(tempPassword, 12);
   user.isActive = true;
   user.mustChangePassword = true;  // Force password change on next login
+  user.tempPasswordExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   await user.save();
   invalidateUserPermissions(user._id).catch(() => {});
   recordPermissionAudit({
@@ -215,14 +226,19 @@ exports.reactivateUser = async (id, adminId) => {
     newValue: { isActive: true, role: user.role },
   }).catch(() => {});
 
-  // Send welcome email with new credentials
-  sendWelcomeEmail({
-    to: user.email,
-    name: user.name,
-    role: user.role,
-    tempPassword,
-    loginUrl: LOGIN_URL,
-  }).catch((err) => console.error('Reactivate email failed:', err.message));
+  // Send welcome email with new credentials (awaited)
+  try {
+    await sendWelcomeEmail({
+      to: user.email,
+      name: user.name,
+      role: user.role,
+      tempPassword,
+      loginUrl: LOGIN_URL,
+      userId: user.userId,
+    });
+  } catch (err) {
+    console.error('Reactivate email failed:', err.message);
+  }
 
   return {
     userId: user._id,

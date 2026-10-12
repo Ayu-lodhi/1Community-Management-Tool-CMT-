@@ -36,6 +36,7 @@ const userSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true },
   mfa: { type: mfaSchema, select: false },
   mustChangePassword: { type: Boolean, default: true },
+  tempPasswordExpiresAt: { type: Date, default: null },
   // Set atomically on first temporary-password login; reset only with new credentials.
   passwordChangeStartedAt: { type: Date, default: null, select: false },
   teamId: { type: mongoose.Schema.Types.ObjectId, ref: 'Team', default: null },
