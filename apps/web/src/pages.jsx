@@ -556,6 +556,11 @@ export const Login = () => {
         err.status = res.status;
         throw err;
       }
+      if (data.data?.mustChangePassword && data.data?.passwordChangeToken) {
+        sessionStorage.setItem('tbi_token', data.data.passwordChangeToken);
+        navigate('/change-password', { replace: true, state: { forced: true } });
+        return;
+      }
       login(data.data.user, data.data.accessToken);
       navigate(ROLES[data.data.user.role].route);
     } catch (err) {
@@ -757,6 +762,12 @@ export const Login = () => {
                 <div className="p-2.5 bg-amber-50 border-2 border-amber-500 shadow-[2px_2px_0px_0px_#1A1A1A] rounded-lg text-xs text-amber-950 font-['Space_Mono',monospace] font-bold flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                   <span>Session expired. Please sign in again.</span>
+                </div>
+              )}
+              {location.state?.successMessage && !error && (
+                <div className="p-2.5 bg-emerald-50 border-2 border-emerald-500 shadow-[2px_2px_0px_0px_#1A1A1A] rounded-lg text-xs text-emerald-950 font-['Space_Mono',monospace] font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{location.state.successMessage}</span>
                 </div>
               )}
 
@@ -9323,6 +9334,8 @@ export const LandingPage = () => {
 export const ChangePasswordPage = () => {
   const { logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isForced = location.state?.forced || Boolean(sessionStorage.getItem('tbi_token') && !sessionStorage.getItem('tbi_user'));
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -9345,10 +9358,13 @@ export const ChangePasswordPage = () => {
     if (!allValid) return setError('Please complete all requirements');
     setLoading(true);
     try {
-      await api.post('/auth/change-password', { oldPassword, newPassword });
-      alert('Password changed successfully. Please login again.');
-      logout();
-      navigate('/login', { replace: true });
+      await api.post('/auth/change-password', {
+        ...(isForced ? {} : { oldPassword }),
+        newPassword,
+      });
+      sessionStorage.removeItem('tbi_token');
+      if (logout) logout();
+      navigate('/login', { replace: true, state: { successMessage: 'Password changed successfully. Please log in.' } });
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to change password');
     } finally {
@@ -9371,12 +9387,14 @@ export const ChangePasswordPage = () => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium mb-2">Current Password</label>
-              <input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)}
-                placeholder="Your temp password"
-                className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required />
-            </div>
+            {!isForced && (
+              <div>
+                <label className="block text-sm font-medium mb-2">Current Password</label>
+                <input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)}
+                  placeholder="Your current password"
+                  className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required={!isForced} />
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium mb-2">New Password</label>
               <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
@@ -9413,7 +9431,7 @@ export const ChangePasswordPage = () => {
               {loading ? 'Updating...' : 'Change Password & Continue'}
             </button>
 
-            <button type="button" onClick={() => { logout(); navigate('/login'); }}
+            <button type="button" onClick={() => { sessionStorage.removeItem('tbi_token'); if (logout) logout(); navigate('/login'); }}
               className="w-full text-center text-sm text-gray-500 hover:text-gray-700">
               Cancel and logout
             </button>
