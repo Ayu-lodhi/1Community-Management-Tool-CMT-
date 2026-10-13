@@ -23,20 +23,18 @@ const app = express();
 const isAllowedOrigin = (origin) => {
   if (!origin) return true;
   if (process.env.ALLOWED_ORIGINS) {
-    const list = process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim());
+    const list = process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean);
     if (list.includes(origin)) return true;
   }
-  if (/^https:\/\/.*\.vercel\.app$/.test(origin)) return true;
-  return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  if (process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+    return true;
+  }
+  return false;
 };
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (isAllowedOrigin(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('CORS not allowed for origin: ' + origin));
-    }
+    callback(null, isAllowedOrigin(origin));
   },
   credentials: true,
 }));
