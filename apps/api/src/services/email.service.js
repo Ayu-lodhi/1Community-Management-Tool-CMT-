@@ -38,6 +38,10 @@ const initTransporter = async () => {
       },
     });
   } else {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('EMAIL_INIT :: Production SMTP credentials missing (EMAIL_HOST, EMAIL_USER, EMAIL_PASS required)');
+      return null;
+    }
     // Use Ethereal for testing
     console.log('EMAIL_INIT :: No SMTP creds - using Ethereal test account');
     testAccount = await nodemailer.createTestAccount();
@@ -57,8 +61,20 @@ const initTransporter = async () => {
   return transporter;
 };
 
+// Reset transporter for testing
+const _resetTransporter = () => {
+  transporter = null;
+  testAccount = null;
+};
+
 // Send email (dispatches to worker queue when available, with direct fallback)
 const sendEmail = async ({ to, subject, html, text, requestId, idempotencyKey, forceDirect = false }) => {
+  const hasRealCreds = process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS;
+  if (process.env.NODE_ENV === 'production' && !hasRealCreds) {
+    console.error('EMAIL_INIT :: Production SMTP credentials missing (EMAIL_HOST, EMAIL_USER, EMAIL_PASS required)');
+    return { success: false, error: 'SMTP credentials missing in production' };
+  }
+
   if (!forceDirect && process.env.USE_WORKER_QUEUES !== 'false' && process.env.NODE_ENV !== 'test') {
     try {
       const enqueueResult = await enqueueEmail(
@@ -76,6 +92,9 @@ const sendEmail = async ({ to, subject, html, text, requestId, idempotencyKey, f
 
   try {
     const t = await initTransporter();
+    if (!t) {
+      return { success: false, error: 'SMTP credentials missing in production' };
+    }
     const info = await t.sendMail({
       from: process.env.EMAIL_FROM || '"TBI Platform" <noreply@tbi.org>',
       to,
@@ -775,5 +794,6 @@ module.exports = {
   sendProfileUpdatedEmail,
   sendPasswordChangedEmail,
   sendEmailChangedEmail,
+  _resetTransporter,
 };
 

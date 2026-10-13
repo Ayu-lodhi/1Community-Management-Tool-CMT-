@@ -17,11 +17,14 @@ exports.addUser = async (req, res) => {
         message: 'Only Super Admins can create Super Admin or Admin accounts',
       });
     }
-    const { user } = await adminService.createUser(req.body, req.user?.role);
+    const { user, emailSent } = await adminService.createUser(req.body, req.user?.role);
     res.status(201).json({
       success: true,
-      message: 'User created. Credentials sent via email.',
+      message: emailSent
+        ? 'User created. Credentials sent via email.'
+        : 'User created, but welcome email could not be sent (SMTP unconfigured or delivery failed).',
       data: user,
+      emailSent,
     });
   } catch (error) {
     const isExpected =

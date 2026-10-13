@@ -1949,7 +1949,11 @@ export const UserManagement = () => {
       setUsers([res.data.data, ...users]);
       setModal(false);
       setForm({ name: '', email: '', phone: '', role: 'T1_VOLUNTEER' });
-      alert(`User created!\n\nAn email with login credentials has been sent to ${res.data.data.email}.`);
+      if (res.data?.emailSent === false) {
+        alert(`User created, but welcome email could not be sent (SMTP not configured or failed).\n\nPlease check server email settings.`);
+      } else {
+        alert(`User created!\n\nAn email with login credentials has been sent to ${res.data.data.email}.`);
+      }
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to create user');
     } finally {
@@ -6899,6 +6903,7 @@ export const BulkImportPage = () => {
     setProgress(0);
 
     let succeeded = 0;
+    let emailFailedCount = 0;
     const importErrors = [];
     const BATCH_SIZE = 25; // Sized to fit comfortably within Vercel serverless function limits
 
@@ -6919,6 +6924,9 @@ export const BulkImportPage = () => {
           const origRow = chunk[idx];
           if (resRow.status === 'created') {
             succeeded++;
+            if (resRow.emailSent === false) {
+              emailFailedCount++;
+            }
           } else {
             importErrors.push({ line: origRow._line, error: resRow.error || 'Failed' });
           }
@@ -6937,7 +6945,7 @@ export const BulkImportPage = () => {
     if (importErrors.length > 0) {
       console.warn('Import errors:', importErrors);
     }
-    setImportResult({ succeeded, failed: importErrors.length, errors: importErrors });
+    setImportResult({ succeeded, failed: importErrors.length, emailFailedCount, errors: importErrors });
   };
 
   const reset = () => {
@@ -7075,6 +7083,7 @@ export const BulkImportPage = () => {
             {importResult ? importResult.succeeded : validRows.length} users created successfully
             {importResult && importResult.failed > 0 ? `, ${importResult.failed} failed` : ''}
             {invalidRows.length > 0 ? `, ${invalidRows.length} invalid rows skipped` : ''}
+            {importResult && importResult.emailFailedCount > 0 ? ` (${importResult.emailFailedCount} created without email delivery)` : ''}
           </p>
           <div className="flex gap-3 justify-center">
             <button className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Download Report</button>

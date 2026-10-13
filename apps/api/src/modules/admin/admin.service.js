@@ -50,18 +50,24 @@ exports.createUser = async (data, callerRole = null) => {
     isActive: true,
   });
 
-  // Send welcome email (fire and forget)
-  sendWelcomeEmail({
-    to: user.email,
-    name: user.name,
-    role: user.role,
-    tempPassword,
-    loginUrl: LOGIN_URL,
-  }).catch((err) => console.error('Welcome email failed:', err.message));
+  // Send welcome email (record status)
+  let emailSent = false;
+  try {
+    const emailResult = await sendWelcomeEmail({
+      to: user.email,
+      name: user.name,
+      role: user.role,
+      tempPassword,
+      loginUrl: LOGIN_URL,
+    });
+    emailSent = Boolean(emailResult?.success);
+  } catch (err) {
+    console.error('Welcome email failed:', err.message);
+  }
 
   const userObj = user.toObject ? user.toObject({ virtuals: false }) : { ...user };
   delete userObj.password;
-  return { user: userObj, tempPassword };
+  return { user: userObj, tempPassword, emailSent };
 };
 
 exports.bulkCreateUsers = async (rows, callerRole = null) => {
@@ -78,12 +84,13 @@ exports.bulkCreateUsers = async (rows, callerRole = null) => {
         err.statusCode = 403;
         throw err;
       }
-      const { user } = await exports.createUser(row, callerRole);
+      const { user, emailSent } = await exports.createUser(row, callerRole);
       succeeded++;
       results.push({
         line,
         email: row.email,
         status: 'created',
+        emailSent,
         user: {
           _id: user._id,
           name: user.name,
