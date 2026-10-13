@@ -481,6 +481,8 @@ const DemoLoginBar = import.meta.env.DEV
 export const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mfaChallenge, setMfaChallenge] = useState(null);
+  const [mfaCode, setMfaCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showMuralOnMobile, setShowMuralOnMobile] = useState(false);
@@ -556,6 +558,12 @@ export const Login = () => {
         err.status = res.status;
         throw err;
       }
+      if (data.data?.mfaRequired && data.data?.challengeToken) {
+        setMfaChallenge(data.data.challengeToken);
+        setMfaCode('');
+        setLoading(false);
+        return;
+      }
       if (data.data?.mustChangePassword && data.data?.passwordChangeToken) {
         sessionStorage.setItem('tbi_token', data.data.passwordChangeToken);
         navigate('/change-password', { replace: true, state: { forced: true } });
@@ -591,6 +599,53 @@ export const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     await performLogin(email, password);
+  };
+
+  const handleVerifyMfa = async (e) => {
+    e.preventDefault();
+    setError('');
+    const code = mfaCode.trim();
+    if (code.length !== 6) {
+      setError('Please enter a valid 6-digit verification code.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/mfa/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          challengeToken: mfaChallenge,
+          code,
+        }),
+      });
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error('Unable to connect to the server. Please try again shortly.');
+      }
+      if (!data.success) {
+        throw new Error(data.message || 'MFA verification failed');
+      }
+      if (data.data?.mustChangePassword && data.data?.passwordChangeToken) {
+        sessionStorage.setItem('tbi_token', data.data.passwordChangeToken);
+        navigate('/change-password', { replace: true, state: { forced: true } });
+        return;
+      }
+      login(data.data.user, data.data.accessToken);
+      navigate(ROLES[data.data.user.role].route);
+    } catch (err) {
+      const raw = err?.message || '';
+      if (/expired/i.test(raw)) {
+        setError('Verification challenge expired. Please enter your credentials again.');
+        setMfaChallenge(null);
+      } else {
+        setError(raw || 'Invalid verification code. Please check your authenticator and try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const emailHasValue = email.trim().length > 0;
@@ -691,53 +746,92 @@ export const Login = () => {
             </div>
 
             {/* Form */}
-            <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-3.5">
-              {/* Field 1: Username / Email */}
-              <div>
-                <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
-                  Username / Email
-                </label>
-                <div className="relative flex items-center bg-white border-[2.5px] border-[#1B5299] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
-                  <span className="pl-3 text-slate-500 shrink-0">
-                    <UserIcon className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-                  </span>
-                  <input
-                    type="text"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Username / Email"
-                    required
-
-                    className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
-                  />
-                  <div className="pr-3 shrink-0">
-                    <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${emailHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+            <form onSubmit={mfaChallenge ? handleVerifyMfa : handleSubmit} className="space-y-3 sm:space-y-3.5">
+              {mfaChallenge ? (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide">
+                      Two-Factor Authentication Code
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => { setMfaChallenge(null); setMfaCode(''); setError(''); }}
+                      className="text-xs text-[#1B5299] hover:underline font-['Space_Mono',monospace]"
+                    >
+                      Cancel
+                    </button>
                   </div>
-                </div>
-              </div>
-
-              {/* Field 2: Password */}
-              <div>
-                <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
-                  Password
-                </label>
-                <div className="relative flex items-center bg-white border-[2.5px] border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:border-[#1B5299] focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
-                  <span className="pl-3 text-slate-500 shrink-0">
-                    <Lock className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-                  </span>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Password"
-                    required
-                    className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
-                  />
-                  <div className="pr-3 shrink-0">
-                    <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${passHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+                  <div className="relative flex items-center bg-white border-[2.5px] border-[#1B5299] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all">
+                    <span className="pl-3 text-slate-500 shrink-0">
+                      <Key className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-[#1B5299]" />
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      autoFocus
+                      value={mfaCode}
+                      onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                      placeholder="6-digit code"
+                      required
+                      className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-base tracking-widest text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-3 font-bold text-center"
+                    />
                   </div>
+                  <p className="text-[11px] text-slate-500 mt-1 font-['Space_Mono',monospace]">
+                    Enter the code from your authenticator app
+                  </p>
                 </div>
-              </div>
+              ) : (
+                <>
+                  {/* Field 1: Username / Email */}
+                  <div>
+                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
+                      Username / Email
+                    </label>
+                    <div className="relative flex items-center bg-white border-[2.5px] border-[#1B5299] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
+                      <span className="pl-3 text-slate-500 shrink-0">
+                        <UserIcon className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                      </span>
+                      <input
+                        type="text"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="Username / Email"
+                        required
+
+                        className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
+                      />
+                      <div className="pr-3 shrink-0">
+                        <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${emailHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Field 2: Password */}
+                  <div>
+                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
+                      Password
+                    </label>
+                    <div className="relative flex items-center bg-white border-[2.5px] border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:border-[#1B5299] focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
+                      <span className="pl-3 text-slate-500 shrink-0">
+                        <Lock className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                      </span>
+                      <input
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Password"
+                        required
+                        className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
+                      />
+                      <div className="pr-3 shrink-0">
+                        <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${passHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Inactivity & Expiry notices */}
               {logoutReason === 'inactivity' && !error && (
@@ -793,7 +887,7 @@ export const Login = () => {
                   disabled={loading}
                   className="w-full bg-[#C8322B] hover:bg-[#B32720] text-white font-['Barlow_Condensed',sans-serif] font-black text-xl sm:text-2xl uppercase tracking-wider py-2.5 sm:py-3 px-6 border-[2.5px] border-[#1A1A1A] shadow-[4px_4px_0px_0px_#1A1A1A] hover:shadow-[2px_2px_0px_0px_#1A1A1A] hover:translate-x-[2px] hover:translate-y-[2px] active:shadow-none active:translate-x-[4px] active:translate-y-[4px] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-center"
                 >
-                  {loading ? 'Accessing...' : 'Sign In'}
+                  {loading ? 'Processing...' : (mfaChallenge ? 'Verify & Sign In' : 'Sign In')}
                 </button>
               </div>
 
