@@ -483,58 +483,39 @@ export const Login = () => {
   const [password, setPassword] = useState('');
   const [mfaChallenge, setMfaChallenge] = useState(null);
   const [mfaCode, setMfaCode] = useState('');
+  const [captchaChallenge, setCaptchaChallenge] = useState(null);
+  const [captchaAnswer, setCaptchaAnswer] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showMuralOnMobile, setShowMuralOnMobile] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState('');
-  const captchaContainerRef = useRef(null);
-  const captchaWidgetIdRef = useRef(null);
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const logoutReason = new URLSearchParams(location.search).get('reason');
-  const SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
 
-  // Load reCAPTCHA script and render widget
-  useEffect(() => {
-    if (!SITE_KEY) return;
-    const SCRIPT_ID = 'recaptcha-script';
-    const renderWidget = () => {
-      if (captchaContainerRef.current && captchaWidgetIdRef.current === null && window.grecaptcha) {
-        captchaWidgetIdRef.current = window.grecaptcha.render(captchaContainerRef.current, {
-          sitekey: SITE_KEY,
-          callback: (token) => setCaptchaToken(token),
-          'expired-callback': () => setCaptchaToken(''),
-          'error-callback': () => setCaptchaToken(''),
-        });
+  const fetchCaptcha = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/captcha`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setCaptchaChallenge(json.data);
+        setCaptchaAnswer('');
       }
-    };
-    if (!document.getElementById(SCRIPT_ID)) {
-      const script = document.createElement('script');
-      script.id = SCRIPT_ID;
-      script.src = 'https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit';
-      script.async = true;
-      script.defer = true;
-      window.onRecaptchaLoad = renderWidget;
-      document.head.appendChild(script);
-    } else if (window.grecaptcha?.render) {
-      renderWidget();
-    } else {
-      window.onRecaptchaLoad = renderWidget;
+    } catch (err) {
+      console.error('Failed to load CAPTCHA challenge:', err);
     }
-    return () => {
-      // Cleanup: reset widget ref so it can re-render if component re-mounts
-      captchaWidgetIdRef.current = null;
-    };
-  }, [SITE_KEY]);
+  }, []);
+
+  useEffect(() => {
+    fetchCaptcha();
+  }, [fetchCaptcha]);
 
   const performLogin = async (loginEmail, loginPassword) => {
     setError('');
     setLoading(true);
     try {
-      // Reject early if CAPTCHA is enabled but token not yet obtained
-      if (SITE_KEY && !captchaToken) {
-        setError('Please complete the CAPTCHA before signing in.');
+      if (captchaChallenge && !captchaAnswer.trim()) {
+        setError('Please enter the security verification code.');
         setLoading(false);
         return;
       }
@@ -544,7 +525,8 @@ export const Login = () => {
         body: JSON.stringify({
           email: loginEmail,
           password: loginPassword,
-          ...(captchaToken ? { 'g-recaptcha-response': captchaToken } : {}),
+          captchaId: captchaChallenge?.captchaId,
+          captchaAnswer: captchaAnswer.trim(),
         }),
       });
       let data;
@@ -582,15 +564,11 @@ export const Login = () => {
       } else if (/inactive|blocked|disabled|suspended/i.test(raw)) {
         setError('Your account is inactive. Please contact the administrator.');
       } else if (/captcha/i.test(raw)) {
-        setError('CAPTCHA verification failed. Please try again.');
+        setError(raw || 'CAPTCHA verification failed. Please try again.');
       } else {
         setError(raw || 'Unable to sign in right now. Please try again in a few moments.');
       }
-      // Reset CAPTCHA widget so user can try again
-      if (SITE_KEY && captchaWidgetIdRef.current !== null && window.grecaptcha) {
-        window.grecaptcha.reset(captchaWidgetIdRef.current);
-        setCaptchaToken('');
-      }
+      void fetchCaptcha();
     } finally {
       setLoading(false);
     }
@@ -873,10 +851,35 @@ export const Login = () => {
                 </div>
               )}
 
-              {/* reCAPTCHA Widget — only rendered when VITE_RECAPTCHA_SITE_KEY is set */}
-              {SITE_KEY && (
-                <div className="flex justify-center pt-1">
-                  <div ref={captchaContainerRef} />
+              {/* Security CAPTCHA Challenge */}
+              {captchaChallenge && !mfaChallenge && (
+                <div className="pt-0.5">
+                  <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
+                    Security Verification
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="rounded-lg overflow-hidden border-[2px] border-[#1E3A52] shadow-[2px_2px_0px_0px_#1A1A1A] shrink-0"
+                      dangerouslySetInnerHTML={{ __html: captchaChallenge.svg }}
+                    />
+                    <button
+                      type="button"
+                      onClick={fetchCaptcha}
+                      title="New CAPTCHA code"
+                      className="h-[48px] w-10 flex items-center justify-center bg-[#E4DDD0] hover:bg-[#D5CBB8] text-[#1A1A1A] border-2 border-[#1A1A1A] rounded-lg shadow-[2px_2px_0px_0px_#1A1A1A] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition cursor-pointer shrink-0"
+                    >
+                      <RefreshCw className="w-4 h-4 text-slate-700" />
+                    </button>
+                    <input
+                      type="text"
+                      value={captchaAnswer}
+                      onChange={(e) => setCaptchaAnswer(e.target.value.toUpperCase())}
+                      placeholder="Code"
+                      maxLength={5}
+                      required
+                      className="flex-1 min-w-0 h-[48px] bg-white border-[2.5px] border-[#1A1A1A] rounded-lg shadow-[2px_2px_0px_0px_#1A1A1A] font-['Space_Mono',monospace] font-bold text-center text-sm tracking-widest uppercase py-2 px-2 outline-none focus:border-[#1B5299]"
+                    />
+                  </div>
                 </div>
               )}
 
