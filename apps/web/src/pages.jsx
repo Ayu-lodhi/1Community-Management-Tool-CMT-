@@ -7433,42 +7433,69 @@ export const TeamsPage = () => {
 // MY SHIFTS
 // ====================================================================
 export const MyShiftsPage = () => {
-  const shifts = [
-    { _id: '1', event: 'Annual Tech Fest 2026', role: 'Tech Team', date: 'Oct 15, 2026', time: '9:00 AM - 1:00 PM', status: 'upcoming' },
-    { _id: '2', event: 'Startup Pitch Day', role: 'Registration', date: 'Nov 5, 2026', time: '10:00 AM - 4:00 PM', status: 'upcoming' },
-    { _id: '3', event: 'Design Sprint', role: 'Media Team', date: 'Sep 20, 2026', time: '2:00 PM - 6:00 PM', status: 'completed' },
-  ];
-  const statusColor = {
-    upcoming: 'bg-blue-100 text-blue-700',
-    completed: 'bg-green-100 text-green-700',
-    missed: 'bg-red-100 text-red-700',
-  };
+  const [teams, setTeams] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchAssignments = async () => {
+      try {
+        const res = await api.get('/teams/me');
+        if (mounted) {
+          const list = Array.isArray(res.data?.data) ? res.data.data : (Array.isArray(res.data) ? res.data : []);
+          setTeams(list);
+        }
+      } catch (err) {
+        console.error('Failed to load assigned teams/shifts:', err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    void fetchAssignments();
+    return () => { mounted = false; };
+  }, []);
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">My Shifts</h1>
-        <p className="text-gray-500">All your assigned shifts across events</p>
+        <h1 className="text-2xl font-bold">My Shifts & Teams</h1>
+        <p className="text-gray-500">Your assigned team and event shift allocations</p>
       </div>
-      <div className="space-y-3">
-        {shifts.map((s) => (
-          <div key={s._id} className="bg-white rounded-xl border border-gray-200 p-5 flex items-center justify-between hover:shadow-md transition">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-lg bg-blue-50 flex items-center justify-center">
-                <Calendar className="w-6 h-6 text-blue-500" />
+
+      {loading ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-500 text-sm">
+          Loading assigned shifts...
+        </div>
+      ) : teams.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
+          <Calendar className="w-10 h-10 text-gray-400 mx-auto mb-3" />
+          <p className="font-semibold text-gray-800">No active shifts assigned yet</p>
+          <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
+            Once a team lead or event head accepts your application or assigns you to an event roster, it will appear here.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {teams.map((t) => (
+            <div key={t._id} className="bg-white rounded-xl border border-gray-200 p-5 flex items-center justify-between hover:shadow-md transition">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                  <Calendar className="w-6 h-6 text-blue-500" />
+                </div>
+                <div>
+                  <p className="font-semibold text-gray-900">{t.eventTitle || t.name}</p>
+                  <p className="text-sm text-gray-500">Team: <span className="font-medium text-gray-700">{t.name}</span></p>
+                  <p className="text-xs text-gray-400 mt-1 flex items-center gap-3">
+                    <span className="flex items-center gap-1"><UsersRound size={12} /> {t.memberCount || t.members?.length || 1} members</span>
+                    {t.leadName && <span className="flex items-center gap-1 font-medium text-gray-600">Lead: {t.leadName}</span>}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="font-semibold">{s.event}</p>
-                <p className="text-sm text-gray-500">{s.role}</p>
-                <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-3">
-                  <span className="flex items-center gap-1"><Calendar size={12} /> {s.date}</span>
-                  <span className="flex items-center gap-1"><Timer size={12} /> {s.time}</span>
-                </p>
-              </div>
+              <span className="text-xs px-3 py-1 rounded-full font-medium bg-emerald-100 text-emerald-700">Active</span>
             </div>
-            <span className={`text-xs px-3 py-1 rounded-full font-medium ${statusColor[s.status]}`}>{s.status}</span>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

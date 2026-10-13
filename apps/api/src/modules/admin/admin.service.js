@@ -411,6 +411,14 @@ exports.updateUserRole = async (targetUserId, newRole, adminUser, ipAddress = nu
 
   const user = await User.findById(targetUserId);
   if (!user) throw new Error('User not found');
+
+  if (adminUser?.role !== 'SUPER_ADMIN') {
+    const err = new Error('Only Super Admins can modify user roles');
+    err.statusCode = 403;
+    err.status = 403;
+    throw err;
+  }
+
   if (user.role === 'SUPER_ADMIN' && adminUser.sub !== user._id.toString()) {
     throw new Error('Only the account holder can modify Super Admin role');
   }

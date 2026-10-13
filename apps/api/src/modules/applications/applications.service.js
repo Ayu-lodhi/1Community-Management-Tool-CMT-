@@ -249,6 +249,22 @@ class ApplicationService {
       }
     }
 
+    // Clean up auto-created attendance if leave was revoked/denied
+    if (['rejected', 'pending'].includes(normalizedStatus) && ['leave', 'half_day'].includes(app.requestType)) {
+      try {
+        const Attendance = require('../attendance/attendance.model');
+        const targetDate = app.targetDate || new Date().toISOString().split('T')[0];
+        await Attendance.deleteOne({
+          studentId: app.studentId,
+          teamId: app.teamId,
+          date: targetDate,
+          status: { $in: ['on_leave', 'half_day'] },
+        });
+      } catch (delErr) {
+        console.warn('Failed to clean up attendance on leave cancellation:', delErr.message);
+      }
+    }
+
     // On approval for team membership
     if (normalizedStatus === 'approved' && (!app.requestType || ['event', 'team_join'].includes(app.requestType))) {
       const team = await Team.findById(app.teamId);
