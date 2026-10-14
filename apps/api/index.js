@@ -27,6 +27,7 @@ const handler = (req, res) => {
       jwt_refresh_secret_length: process.env.JWT_REFRESH_SECRET ? process.env.JWT_REFRESH_SECRET.length : 0,
       secrets_are_different: process.env.JWT_ACCESS_SECRET !== process.env.JWT_REFRESH_SECRET,
       has_ALLOW_NO_REDIS: Boolean(process.env.ALLOW_NO_REDIS),
+      vercel_project_name: process.env.VERCEL_PROJECT_NAME || 'unknown',
       detected_keys: Object.keys(process.env).filter(k => !k.startsWith('npm_') && !k.startsWith('AWS_') && !k.startsWith('_')).sort(),
       initError: initError ? initError.message : null,
       timestamp: new Date().toISOString(),
