@@ -47,7 +47,8 @@ function validateEnvironment(env = process.env) {
     console.error(
       `FATAL CONFIG ERROR: Startup environment validation failed. Missing or invalid variables: ${uniqueFields.join(', ')}`
     );
-    if (env.VERCEL) {
+    const isServerless = Boolean(env.VERCEL || process.env.VERCEL || process.env.VERCEL_ENV || process.env.NOW_REGION);
+    if (isServerless) {
       const err = new Error(
         `Startup environment validation failed. Missing or invalid variables: ${uniqueFields.join(', ')}`
       );
