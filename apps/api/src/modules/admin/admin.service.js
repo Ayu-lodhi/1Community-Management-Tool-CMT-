@@ -4,6 +4,7 @@ const { disconnectUserSockets } = require('../../config/socket');
 const { invalidateUserPermissions } = require('../../core/cache/permissionCache');
 const { recordPermissionAudit } = require('../../core/utils/auditLogger');
 const User = require('./admin.model');
+const { getNextUserId } = require('../../services/userId.service');
 const { sendWelcomeEmail, sendPasswordResetLinkEmail, sendProfileUpdatedEmail, sendPasswordChangedEmail, sendEmailChangedEmail } = require('../../services/email.service');
 let ROLE_DEFAULT_PERMISSIONS;
 try {
@@ -39,29 +40,42 @@ exports.createUser = async (data, callerRole = null) => {
 
   const tempPassword = generateDefaultPassword();
   const hashedPassword = await bcrypt.hash(tempPassword, 12);
+  const userId = (data.userId || await getNextUserId()).toUpperCase();
+  const tempPasswordExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   const user = await User.create({
+    userId,
     name: data.name,
     email: data.email.toLowerCase(),
     phone: data.phone || '',
     role: data.role || 'T1_VOLUNTEER',
     password: hashedPassword,
     mustChangePassword: true,
+    tempPasswordExpiresAt,
     isActive: true,
   });
 
-  // Send welcome email (fire and forget)
-  sendWelcomeEmail({
-    to: user.email,
-    name: user.name,
-    role: user.role,
-    tempPassword,
-    loginUrl: LOGIN_URL,
-  }).catch((err) => console.error('Welcome email failed:', err.message));
+  // Send welcome email (awaited for serverless reliability)
+  let emailDelivery = { sent: false, error: null };
+  try {
+    const emailResult = await sendWelcomeEmail({
+      to: user.email,
+      name: user.name,
+      role: user.role,
+      tempPassword,
+      loginUrl: LOGIN_URL,
+      userId: user.userId,
+    });
+    const sent = emailResult?.success !== false && Boolean(emailResult?.success);
+    emailDelivery = { sent, error: emailResult?.error || null };
+  } catch (err) {
+    console.error('Welcome email failed:', err.message);
+    emailDelivery = { sent: false, error: err.message };
+  }
 
   const userObj = user.toObject ? user.toObject({ virtuals: false }) : { ...user };
   delete userObj.password;
-  return { user: userObj, tempPassword };
+  return { user: userObj, tempPassword, emailSent: emailDelivery.sent, emailDelivery };
 };
 
 exports.bulkCreateUsers = async (rows, callerRole = null) => {
@@ -78,14 +92,16 @@ exports.bulkCreateUsers = async (rows, callerRole = null) => {
         err.statusCode = 403;
         throw err;
       }
-      const { user } = await exports.createUser(row, callerRole);
+      const { user, emailSent } = await exports.createUser(row, callerRole);
       succeeded++;
       results.push({
         line,
         email: row.email,
         status: 'created',
+        emailSent,
         user: {
           _id: user._id,
+          userId: user.userId,
           name: user.name,
           email: user.email,
           role: user.role,
@@ -207,6 +223,7 @@ exports.reactivateUser = async (id, adminId) => {
   user.password = await bcrypt.hash(tempPassword, 12);
   user.isActive = true;
   user.mustChangePassword = true;  // Force password change on next login
+  user.tempPasswordExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   await user.save();
   await invalidateUserPermissions(user._id);
   await recordPermissionAudit({
@@ -218,14 +235,19 @@ exports.reactivateUser = async (id, adminId) => {
     newValue: { isActive: true, role: user.role },
   });
 
-  // Send welcome email with new credentials
-  sendWelcomeEmail({
-    to: user.email,
-    name: user.name,
-    role: user.role,
-    tempPassword,
-    loginUrl: LOGIN_URL,
-  }).catch((err) => console.error('Reactivate email failed:', err.message));
+  // Send welcome email with new credentials (awaited)
+  try {
+    await sendWelcomeEmail({
+      to: user.email,
+      name: user.name,
+      role: user.role,
+      tempPassword,
+      loginUrl: LOGIN_URL,
+      userId: user.userId,
+    });
+  } catch (err) {
+    console.error('Reactivate email failed:', err.message);
+  }
 
   return {
     userId: user._id,
@@ -404,6 +426,14 @@ exports.updateUserRole = async (targetUserId, newRole, adminUser, ipAddress = nu
 
   const user = await User.findById(targetUserId);
   if (!user) throw new Error('User not found');
+
+  if (adminUser?.role !== 'SUPER_ADMIN') {
+    const err = new Error('Only Super Admins can modify user roles');
+    err.statusCode = 403;
+    err.status = 403;
+    throw err;
+  }
+
   if (user.role === 'SUPER_ADMIN' && adminUser.sub !== user._id.toString()) {
     throw new Error('Only the account holder can modify Super Admin role');
   }

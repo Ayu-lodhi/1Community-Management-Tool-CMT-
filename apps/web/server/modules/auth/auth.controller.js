@@ -1,16 +1,27 @@
 const authService = require('./auth.service');
+const captchaService = require('../../services/captcha.service');
+
+exports.getCaptcha = async (req, res) => {
+  try {
+    const challenge = await captchaService.createCaptchaChallenge();
+    res.status(200).json({ success: true, data: challenge });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to generate CAPTCHA challenge' });
+  }
+};
 
 exports.login = async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) {
+    const loginIdentifier = req.body.identifier || req.body.email;
+    const { password } = req.body;
+    if (!loginIdentifier || !password) {
       return res.status(400).json({
         success: false,
         message: 'Email and password are required',
       });
     }
 
-    const result = await authService.login(email, password);
+    const result = await authService.login(loginIdentifier, password);
 
     let message = 'Login successful';
     if (result.mfaRequired) {

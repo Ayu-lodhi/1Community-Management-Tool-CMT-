@@ -481,58 +481,41 @@ const DemoLoginBar = import.meta.env.DEV
 export const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mfaChallenge, setMfaChallenge] = useState(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [captchaChallenge, setCaptchaChallenge] = useState(null);
+  const [captchaAnswer, setCaptchaAnswer] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showMuralOnMobile, setShowMuralOnMobile] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState('');
-  const captchaContainerRef = useRef(null);
-  const captchaWidgetIdRef = useRef(null);
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const logoutReason = new URLSearchParams(location.search).get('reason');
-  const SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
 
-  // Load reCAPTCHA script and render widget
-  useEffect(() => {
-    if (!SITE_KEY) return;
-    const SCRIPT_ID = 'recaptcha-script';
-    const renderWidget = () => {
-      if (captchaContainerRef.current && captchaWidgetIdRef.current === null && window.grecaptcha) {
-        captchaWidgetIdRef.current = window.grecaptcha.render(captchaContainerRef.current, {
-          sitekey: SITE_KEY,
-          callback: (token) => setCaptchaToken(token),
-          'expired-callback': () => setCaptchaToken(''),
-          'error-callback': () => setCaptchaToken(''),
-        });
+  const fetchCaptcha = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/captcha`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setCaptchaChallenge(json.data);
+        setCaptchaAnswer('');
       }
-    };
-    if (!document.getElementById(SCRIPT_ID)) {
-      const script = document.createElement('script');
-      script.id = SCRIPT_ID;
-      script.src = 'https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit';
-      script.async = true;
-      script.defer = true;
-      window.onRecaptchaLoad = renderWidget;
-      document.head.appendChild(script);
-    } else if (window.grecaptcha?.render) {
-      renderWidget();
-    } else {
-      window.onRecaptchaLoad = renderWidget;
+    } catch (err) {
+      console.error('Failed to load CAPTCHA challenge:', err);
     }
-    return () => {
-      // Cleanup: reset widget ref so it can re-render if component re-mounts
-      captchaWidgetIdRef.current = null;
-    };
-  }, [SITE_KEY]);
+  }, []);
+
+  useEffect(() => {
+    fetchCaptcha();
+  }, [fetchCaptcha]);
 
   const performLogin = async (loginEmail, loginPassword) => {
     setError('');
     setLoading(true);
     try {
-      // Reject early if CAPTCHA is enabled but token not yet obtained
-      if (SITE_KEY && !captchaToken) {
-        setError('Please complete the CAPTCHA before signing in.');
+      if (captchaChallenge && !captchaAnswer.trim()) {
+        setError('Please enter the security verification code.');
         setLoading(false);
         return;
       }
@@ -540,9 +523,11 @@ export const Login = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          identifier: loginEmail,
           email: loginEmail,
           password: loginPassword,
-          ...(captchaToken ? { 'g-recaptcha-response': captchaToken } : {}),
+          captchaId: captchaChallenge?.captchaId,
+          captchaAnswer: captchaAnswer.trim(),
         }),
       });
       let data;
@@ -555,6 +540,17 @@ export const Login = () => {
         const err = new Error(data.message || 'Login failed');
         err.status = res.status;
         throw err;
+      }
+      if (data.data?.mfaRequired && data.data?.challengeToken) {
+        setMfaChallenge(data.data.challengeToken);
+        setMfaCode('');
+        setLoading(false);
+        return;
+      }
+      if (data.data?.mustChangePassword && data.data?.passwordChangeToken) {
+        sessionStorage.setItem('tbi_token', data.data.passwordChangeToken);
+        navigate('/change-password', { replace: true, state: { forced: true } });
+        return;
       }
       login(data.data.user, data.data.accessToken);
       navigate(ROLES[data.data.user.role].route);
@@ -569,15 +565,11 @@ export const Login = () => {
       } else if (/inactive|blocked|disabled|suspended/i.test(raw)) {
         setError('Your account is inactive. Please contact the administrator.');
       } else if (/captcha/i.test(raw)) {
-        setError('CAPTCHA verification failed. Please try again.');
+        setError(raw || 'CAPTCHA verification failed. Please try again.');
       } else {
         setError(raw || 'Unable to sign in right now. Please try again in a few moments.');
       }
-      // Reset CAPTCHA widget so user can try again
-      if (SITE_KEY && captchaWidgetIdRef.current !== null && window.grecaptcha) {
-        window.grecaptcha.reset(captchaWidgetIdRef.current);
-        setCaptchaToken('');
-      }
+      void fetchCaptcha();
     } finally {
       setLoading(false);
     }
@@ -586,6 +578,53 @@ export const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     await performLogin(email, password);
+  };
+
+  const handleVerifyMfa = async (e) => {
+    e.preventDefault();
+    setError('');
+    const code = mfaCode.trim();
+    if (code.length !== 6) {
+      setError('Please enter a valid 6-digit verification code.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/mfa/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          challengeToken: mfaChallenge,
+          code,
+        }),
+      });
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error('Unable to connect to the server. Please try again shortly.');
+      }
+      if (!data.success) {
+        throw new Error(data.message || 'MFA verification failed');
+      }
+      if (data.data?.mustChangePassword && data.data?.passwordChangeToken) {
+        sessionStorage.setItem('tbi_token', data.data.passwordChangeToken);
+        navigate('/change-password', { replace: true, state: { forced: true } });
+        return;
+      }
+      login(data.data.user, data.data.accessToken);
+      navigate(ROLES[data.data.user.role].route);
+    } catch (err) {
+      const raw = err?.message || '';
+      if (/expired/i.test(raw)) {
+        setError('Verification challenge expired. Please enter your credentials again.');
+        setMfaChallenge(null);
+      } else {
+        setError(raw || 'Invalid verification code. Please check your authenticator and try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const emailHasValue = email.trim().length > 0;
@@ -686,53 +725,91 @@ export const Login = () => {
             </div>
 
             {/* Form */}
-            <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-3.5">
-              {/* Field 1: Username / Email */}
-              <div>
-                <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
-                  Username / Email
-                </label>
-                <div className="relative flex items-center bg-white border-[2.5px] border-[#1B5299] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
-                  <span className="pl-3 text-slate-500 shrink-0">
-                    <UserIcon className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-                  </span>
-                  <input
-                    type="text"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Username / Email"
-                    required
-
-                    className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
-                  />
-                  <div className="pr-3 shrink-0">
-                    <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${emailHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+            <form onSubmit={mfaChallenge ? handleVerifyMfa : handleSubmit} className="space-y-3 sm:space-y-3.5">
+              {mfaChallenge ? (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide">
+                      Two-Factor Authentication Code
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => { setMfaChallenge(null); setMfaCode(''); setError(''); }}
+                      className="text-xs text-[#1B5299] hover:underline font-['Space_Mono',monospace]"
+                    >
+                      Cancel
+                    </button>
                   </div>
-                </div>
-              </div>
-
-              {/* Field 2: Password */}
-              <div>
-                <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
-                  Password
-                </label>
-                <div className="relative flex items-center bg-white border-[2.5px] border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:border-[#1B5299] focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
-                  <span className="pl-3 text-slate-500 shrink-0">
-                    <Lock className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-                  </span>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Password"
-                    required
-                    className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
-                  />
-                  <div className="pr-3 shrink-0">
-                    <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${passHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+                  <div className="relative flex items-center bg-white border-[2.5px] border-[#1B5299] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all">
+                    <span className="pl-3 text-slate-500 shrink-0">
+                      <Key className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-[#1B5299]" />
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      autoFocus
+                      value={mfaCode}
+                      onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                      placeholder="6-digit code"
+                      required
+                      className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-base tracking-widest text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-3 font-bold text-center"
+                    />
                   </div>
+                  <p className="text-[11px] text-slate-500 mt-1 font-['Space_Mono',monospace]">
+                    Enter the code from your authenticator app
+                  </p>
                 </div>
-              </div>
+              ) : (
+                <>
+                  {/* Field 1: User ID or Email */}
+                  <div>
+                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
+                      User ID or Email
+                    </label>
+                    <div className="relative flex items-center bg-white border-[2.5px] border-[#1B5299] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
+                      <span className="pl-3 text-slate-500 shrink-0">
+                        <UserIcon className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                      </span>
+                      <input
+                        type="text"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="User ID or Email"
+                        required
+                        className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
+                      />
+                      <div className="pr-3 shrink-0">
+                        <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${emailHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Field 2: Password */}
+                  <div>
+                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
+                      Password
+                    </label>
+                    <div className="relative flex items-center bg-white border-[2.5px] border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:border-[#1B5299] focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
+                      <span className="pl-3 text-slate-500 shrink-0">
+                        <Lock className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                      </span>
+                      <input
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Password"
+                        required
+                        className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
+                      />
+                      <div className="pr-3 shrink-0">
+                        <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${passHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Inactivity & Expiry notices */}
               {logoutReason === 'inactivity' && !error && (
@@ -759,6 +836,12 @@ export const Login = () => {
                   <span>Session expired. Please sign in again.</span>
                 </div>
               )}
+              {location.state?.successMessage && !error && (
+                <div className="p-2.5 bg-emerald-50 border-2 border-emerald-500 shadow-[2px_2px_0px_0px_#1A1A1A] rounded-lg text-xs text-emerald-950 font-['Space_Mono',monospace] font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{location.state.successMessage}</span>
+                </div>
+              )}
 
               {/* Error notice */}
               {error && (
@@ -768,10 +851,35 @@ export const Login = () => {
                 </div>
               )}
 
-              {/* reCAPTCHA Widget — only rendered when VITE_RECAPTCHA_SITE_KEY is set */}
-              {SITE_KEY && (
-                <div className="flex justify-center pt-1">
-                  <div ref={captchaContainerRef} />
+              {/* Security CAPTCHA Challenge */}
+              {captchaChallenge && !mfaChallenge && (
+                <div className="pt-0.5">
+                  <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
+                    Security Verification
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="rounded-lg overflow-hidden border-[2px] border-[#1E3A52] shadow-[2px_2px_0px_0px_#1A1A1A] shrink-0"
+                      dangerouslySetInnerHTML={{ __html: captchaChallenge.svg }}
+                    />
+                    <button
+                      type="button"
+                      onClick={fetchCaptcha}
+                      title="New CAPTCHA code"
+                      className="h-[48px] w-10 flex items-center justify-center bg-[#E4DDD0] hover:bg-[#D5CBB8] text-[#1A1A1A] border-2 border-[#1A1A1A] rounded-lg shadow-[2px_2px_0px_0px_#1A1A1A] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition cursor-pointer shrink-0"
+                    >
+                      <RefreshCw className="w-4 h-4 text-slate-700" />
+                    </button>
+                    <input
+                      type="text"
+                      value={captchaAnswer}
+                      onChange={(e) => setCaptchaAnswer(e.target.value.toUpperCase())}
+                      placeholder="Code"
+                      maxLength={5}
+                      required
+                      className="flex-1 min-w-0 h-[48px] bg-white border-[2.5px] border-[#1A1A1A] rounded-lg shadow-[2px_2px_0px_0px_#1A1A1A] font-['Space_Mono',monospace] font-bold text-center text-sm tracking-widest uppercase py-2 px-2 outline-none focus:border-[#1B5299]"
+                    />
+                  </div>
                 </div>
               )}
 
@@ -782,7 +890,7 @@ export const Login = () => {
                   disabled={loading}
                   className="w-full bg-[#C8322B] hover:bg-[#B32720] text-white font-['Barlow_Condensed',sans-serif] font-black text-xl sm:text-2xl uppercase tracking-wider py-2.5 sm:py-3 px-6 border-[2.5px] border-[#1A1A1A] shadow-[4px_4px_0px_0px_#1A1A1A] hover:shadow-[2px_2px_0px_0px_#1A1A1A] hover:translate-x-[2px] hover:translate-y-[2px] active:shadow-none active:translate-x-[4px] active:translate-y-[4px] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-center"
                 >
-                  {loading ? 'Accessing...' : 'Sign In'}
+                  {loading ? 'Processing...' : (mfaChallenge ? 'Verify & Sign In' : 'Sign In')}
                 </button>
               </div>
 
@@ -1844,7 +1952,11 @@ export const UserManagement = () => {
       setUsers([res.data.data, ...users]);
       setModal(false);
       setForm({ name: '', email: '', phone: '', role: 'T1_VOLUNTEER' });
-      alert(`User created!\n\nAn email with login credentials has been sent to ${res.data.data.email}.`);
+      if (res.data?.emailSent === false) {
+        alert(`User created, but welcome email could not be sent (SMTP not configured or failed).\n\nPlease check server email settings.`);
+      } else {
+        alert(`User created!\n\nAn email with login credentials has been sent to ${res.data.data.email}.`);
+      }
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to create user');
     } finally {
@@ -6794,6 +6906,7 @@ export const BulkImportPage = () => {
     setProgress(0);
 
     let succeeded = 0;
+    let emailFailedCount = 0;
     const importErrors = [];
     const BATCH_SIZE = 25; // Sized to fit comfortably within Vercel serverless function limits
 
@@ -6814,6 +6927,9 @@ export const BulkImportPage = () => {
           const origRow = chunk[idx];
           if (resRow.status === 'created') {
             succeeded++;
+            if (resRow.emailSent === false) {
+              emailFailedCount++;
+            }
           } else {
             importErrors.push({ line: origRow._line, error: resRow.error || 'Failed' });
           }
@@ -6832,7 +6948,7 @@ export const BulkImportPage = () => {
     if (importErrors.length > 0) {
       console.warn('Import errors:', importErrors);
     }
-    setImportResult({ succeeded, failed: importErrors.length, errors: importErrors });
+    setImportResult({ succeeded, failed: importErrors.length, emailFailedCount, errors: importErrors });
   };
 
   const reset = () => {
@@ -6970,6 +7086,7 @@ export const BulkImportPage = () => {
             {importResult ? importResult.succeeded : validRows.length} users created successfully
             {importResult && importResult.failed > 0 ? `, ${importResult.failed} failed` : ''}
             {invalidRows.length > 0 ? `, ${invalidRows.length} invalid rows skipped` : ''}
+            {importResult && importResult.emailFailedCount > 0 ? ` (${importResult.emailFailedCount} created without email delivery)` : ''}
           </p>
           <div className="flex gap-3 justify-center">
             <button className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Download Report</button>
@@ -7316,42 +7433,69 @@ export const TeamsPage = () => {
 // MY SHIFTS
 // ====================================================================
 export const MyShiftsPage = () => {
-  const shifts = [
-    { _id: '1', event: 'Annual Tech Fest 2026', role: 'Tech Team', date: 'Oct 15, 2026', time: '9:00 AM - 1:00 PM', status: 'upcoming' },
-    { _id: '2', event: 'Startup Pitch Day', role: 'Registration', date: 'Nov 5, 2026', time: '10:00 AM - 4:00 PM', status: 'upcoming' },
-    { _id: '3', event: 'Design Sprint', role: 'Media Team', date: 'Sep 20, 2026', time: '2:00 PM - 6:00 PM', status: 'completed' },
-  ];
-  const statusColor = {
-    upcoming: 'bg-blue-100 text-blue-700',
-    completed: 'bg-green-100 text-green-700',
-    missed: 'bg-red-100 text-red-700',
-  };
+  const [teams, setTeams] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchAssignments = async () => {
+      try {
+        const res = await api.get('/teams/me');
+        if (mounted) {
+          const list = Array.isArray(res.data?.data) ? res.data.data : (Array.isArray(res.data) ? res.data : []);
+          setTeams(list);
+        }
+      } catch (err) {
+        console.error('Failed to load assigned teams/shifts:', err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    void fetchAssignments();
+    return () => { mounted = false; };
+  }, []);
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">My Shifts</h1>
-        <p className="text-gray-500">All your assigned shifts across events</p>
+        <h1 className="text-2xl font-bold">My Shifts & Teams</h1>
+        <p className="text-gray-500">Your assigned team and event shift allocations</p>
       </div>
-      <div className="space-y-3">
-        {shifts.map((s) => (
-          <div key={s._id} className="bg-white rounded-xl border border-gray-200 p-5 flex items-center justify-between hover:shadow-md transition">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-lg bg-blue-50 flex items-center justify-center">
-                <Calendar className="w-6 h-6 text-blue-500" />
+
+      {loading ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-500 text-sm">
+          Loading assigned shifts...
+        </div>
+      ) : teams.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
+          <Calendar className="w-10 h-10 text-gray-400 mx-auto mb-3" />
+          <p className="font-semibold text-gray-800">No active shifts assigned yet</p>
+          <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
+            Once a team lead or event head accepts your application or assigns you to an event roster, it will appear here.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {teams.map((t) => (
+            <div key={t._id} className="bg-white rounded-xl border border-gray-200 p-5 flex items-center justify-between hover:shadow-md transition">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                  <Calendar className="w-6 h-6 text-blue-500" />
+                </div>
+                <div>
+                  <p className="font-semibold text-gray-900">{t.eventTitle || t.name}</p>
+                  <p className="text-sm text-gray-500">Team: <span className="font-medium text-gray-700">{t.name}</span></p>
+                  <p className="text-xs text-gray-400 mt-1 flex items-center gap-3">
+                    <span className="flex items-center gap-1"><UsersRound size={12} /> {t.memberCount || t.members?.length || 1} members</span>
+                    {t.leadName && <span className="flex items-center gap-1 font-medium text-gray-600">Lead: {t.leadName}</span>}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="font-semibold">{s.event}</p>
-                <p className="text-sm text-gray-500">{s.role}</p>
-                <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-3">
-                  <span className="flex items-center gap-1"><Calendar size={12} /> {s.date}</span>
-                  <span className="flex items-center gap-1"><Timer size={12} /> {s.time}</span>
-                </p>
-              </div>
+              <span className="text-xs px-3 py-1 rounded-full font-medium bg-emerald-100 text-emerald-700">Active</span>
             </div>
-            <span className={`text-xs px-3 py-1 rounded-full font-medium ${statusColor[s.status]}`}>{s.status}</span>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -8857,6 +9001,9 @@ export const ProfilePage = () => {
           <div className="flex-1">
             <h2 className="text-xl font-bold">{user.name}</h2>
             <p className="text-sm text-gray-500">{user.email}</p>
+            {user.userId && (
+              <p className="text-xs font-mono font-bold text-gray-700 mt-1">User ID: {user.userId}</p>
+            )}
             <span className="inline-block mt-2 text-xs px-2 py-1 rounded-full font-medium text-white" style={{ backgroundColor: cfg.color }}>{cfg.label}</span>
           </div>
         </div>
@@ -8873,6 +9020,12 @@ export const ProfilePage = () => {
 
         <form onSubmit={handleSave} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
+            {user.userId && (
+              <div className="col-span-2">
+                <label className="block text-sm font-medium mb-1.5">User ID</label>
+                <input value={user.userId} disabled readOnly className="w-full h-11 px-3 rounded-lg border border-gray-200 outline-none bg-gray-50 text-gray-700 font-mono text-sm font-bold" />
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium mb-1.5">Full Name</label>
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full h-11 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" />
@@ -9323,6 +9476,8 @@ export const LandingPage = () => {
 export const ChangePasswordPage = () => {
   const { logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isForced = location.state?.forced || Boolean(sessionStorage.getItem('tbi_token') && !sessionStorage.getItem('tbi_user'));
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -9345,10 +9500,13 @@ export const ChangePasswordPage = () => {
     if (!allValid) return setError('Please complete all requirements');
     setLoading(true);
     try {
-      await api.post('/auth/change-password', { oldPassword, newPassword });
-      alert('Password changed successfully. Please login again.');
-      logout();
-      navigate('/login', { replace: true });
+      await api.post('/auth/change-password', {
+        ...(isForced ? {} : { oldPassword }),
+        newPassword,
+      });
+      sessionStorage.removeItem('tbi_token');
+      if (logout) logout();
+      navigate('/login', { replace: true, state: { successMessage: 'Password changed successfully. Please log in.' } });
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to change password');
     } finally {
@@ -9371,12 +9529,14 @@ export const ChangePasswordPage = () => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium mb-2">Current Password</label>
-              <input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)}
-                placeholder="Your temp password"
-                className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required />
-            </div>
+            {!isForced && (
+              <div>
+                <label className="block text-sm font-medium mb-2">Current Password</label>
+                <input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)}
+                  placeholder="Your current password"
+                  className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required={!isForced} />
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium mb-2">New Password</label>
               <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
@@ -9413,7 +9573,7 @@ export const ChangePasswordPage = () => {
               {loading ? 'Updating...' : 'Change Password & Continue'}
             </button>
 
-            <button type="button" onClick={() => { logout(); navigate('/login'); }}
+            <button type="button" onClick={() => { sessionStorage.removeItem('tbi_token'); if (logout) logout(); navigate('/login'); }}
               className="w-full text-center text-sm text-gray-500 hover:text-gray-700">
               Cancel and logout
             </button>

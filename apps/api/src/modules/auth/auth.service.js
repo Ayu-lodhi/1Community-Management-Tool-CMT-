@@ -83,10 +83,10 @@ const acquireSession = async (userId) => {
   return { updatedUser, sessionId };
 };
 
-exports.login = async (email, password) => {
-  if (typeof email !== 'string' || typeof password !== 'string') throw new Error('Invalid credentials');
+exports.login = async (identifier, password) => {
+  if (typeof identifier !== 'string' || typeof password !== 'string') throw new Error('Invalid credentials');
   await ensureDbConnected();
-  let user = await repository.findByEmail(email);
+  let user = await repository.findByIdentifier(identifier);
   if (!user) throw new Error('Invalid credentials');
   if (!user.isActive) throw new Error('Account is deactivated');
 
@@ -99,6 +99,10 @@ exports.login = async (email, password) => {
   const requiresMfa = await tokens.requiresMfa(user.role);
   if (requiresMfa && !user.mfa) throw new Error('MFA enrollment required; contact your system operator');
   if (user.mustChangePassword) {
+    const isExpired = user.tempPasswordExpiresAt
+      ? new Date() > new Date(user.tempPasswordExpiresAt)
+      : user.createdAt && (Date.now() - new Date(user.createdAt).getTime() > 7 * 24 * 60 * 60 * 1000);
+    if (isExpired) throw new Error('Temporary password expired; ask an administrator to reset it');
     if (user.passwordChangeStartedAt) throw new Error('Temporary password already used; ask an administrator to reset it');
     user = await repository.consumeTemporaryPassword(user);
     if (!user) throw new Error('Credentials changed or temporary password already used; ask an administrator to reset it');
@@ -159,7 +163,7 @@ const issueSession = (user, isMfaVerified, sessionId) => {
       passwordChangeToken: tokens.sign(user, 'password-change', remaining, { isMfaVerified, sid }),
     };
   }
-  const accessToken = tokens.sign(user, 'access', process.env.JWT_ACCESS_EXPIRY || '15m', {
+  const accessToken = tokens.sign(user, 'access', process.env.JWT_ACCESS_EXPIRY || '30m', {
     role: user.role, isMfaVerified, sid,
   });
   const refreshToken = tokens.sign(user, 'refresh', process.env.JWT_REFRESH_EXPIRY || '7d', { sid });
@@ -167,6 +171,7 @@ const issueSession = (user, isMfaVerified, sessionId) => {
   return {
     user: {
       _id: user._id,
+      userId: user.userId,
       name: user.name,
       email: user.email,
       role: user.role,
@@ -317,6 +322,7 @@ exports.changeEmail = async (credential, newEmail, currentPassword) => {
     email: user.email,
     user: {
       _id: user._id,
+      userId: user.userId,
       name: user.name,
       email: user.email,
       role: user.role,

@@ -19,7 +19,7 @@ const ENV = Object.freeze({
   get REDIS_QUEUE_URL() { return process.env.ALLOW_NO_REDIS === 'true' ? process.env.REDIS_QUEUE_URL : requireEnv('REDIS_QUEUE_URL'); },
   get JWT_ACCESS_SECRET() { return requireEnv('JWT_ACCESS_SECRET'); },
   get JWT_REFRESH_SECRET() { return requireEnv('JWT_REFRESH_SECRET'); },
-  JWT_ACCESS_EXPIRY: process.env.JWT_ACCESS_EXPIRY || '15m',
+  JWT_ACCESS_EXPIRY: process.env.JWT_ACCESS_EXPIRY || '30m',
   JWT_REFRESH_EXPIRY: process.env.JWT_REFRESH_EXPIRY || '7d'
 });
 

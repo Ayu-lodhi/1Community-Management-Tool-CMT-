@@ -1,7 +1,21 @@
 const User = require('../admin/admin.model');
 
-exports.findByEmail = (email) => User.findOne({ email }).select('+password +mfa +passwordChangeStartedAt');
+exports.findByEmail = (email) => User.findOne({ email: String(email).toLowerCase() }).select('+password +mfa +passwordChangeStartedAt');
+exports.findByUserId = (userId) => User.findOne({ userId: String(userId).toUpperCase() }).select('+password +mfa +passwordChangeStartedAt');
 exports.findById = (id) => User.findById(id).select('+password +mfa +passwordChangeStartedAt');
+
+exports.findByIdentifier = (identifier) => {
+  const trimmed = String(identifier || '').trim();
+  if (trimmed.includes('@')) {
+    return exports.findByEmail(trimmed);
+  }
+  return User.findOne({
+    $or: [
+      { userId: trimmed.toUpperCase() },
+      { email: trimmed.toLowerCase() },
+    ],
+  }).select('+password +mfa +passwordChangeStartedAt');
+};
 
 // Reserve attempts atomically across API instances and across login challenges.
 exports.reserveMfaAttempt = async (id, version) => {
@@ -42,5 +56,5 @@ exports.consumeTemporaryPassword = (user) => User.findOneAndUpdate({
 { new: true }).select('+password +mfa +passwordChangeStartedAt');
 
 exports.replacePassword = (user, password) => User.findOneAndUpdate(credentialFilter(user), {
-  $set: { password, mustChangePassword: false, passwordChangeStartedAt: null, lastPasswordUpdatedAt: new Date(), updatedAt: new Date() },
+  $set: { password, mustChangePassword: false, passwordChangeStartedAt: null, tempPasswordExpiresAt: null, lastPasswordUpdatedAt: new Date(), updatedAt: new Date() },
 }, { new: true });
