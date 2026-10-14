@@ -35,6 +35,9 @@ const isAllowedOrigin = (origin) => {
     const list = process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean);
     if (list.includes(origin)) return true;
   }
+  if (process.env.CLIENT_URL && origin === process.env.CLIENT_URL) return true;
+  if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) return true;
+  if (process.env.VERCEL && origin.endsWith('.vercel.app')) return true;
   if (process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
     return true;
   }
