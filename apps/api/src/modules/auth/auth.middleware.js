@@ -211,7 +211,16 @@ exports.requireTeam = (teamName) => {
   };
 };
 // Admin granular permission check (only checks if role is ADMIN)
-const { ROLE_DEFAULT_PERMISSIONS } = require('@tbi/shared-constants/permissions');
+let ROLE_DEFAULT_PERMISSIONS = {};
+try {
+  ({ ROLE_DEFAULT_PERMISSIONS } = require('@tbi/shared-constants/permissions'));
+} catch (_) {
+  try {
+    ({ ROLE_DEFAULT_PERMISSIONS } = require('../../../../../packages/shared-constants/permissions.js'));
+  } catch (_) {
+    ROLE_DEFAULT_PERMISSIONS = { ADMIN: [] };
+  }
+}
 
 exports.requireAdminPermission = (requiredPermission) => {
   return async (req, res, next) => {
