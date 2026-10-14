@@ -6,13 +6,31 @@ const { recordPermissionAudit } = require('../../core/utils/auditLogger');
 const User = require('./admin.model');
 const { getNextUserId } = require('../../services/userId.service');
 const { sendWelcomeEmail, sendPasswordResetLinkEmail, sendProfileUpdatedEmail, sendPasswordChangedEmail, sendEmailChangedEmail } = require('../../services/email.service');
-let ROLE_DEFAULT_PERMISSIONS;
-try {
-  ({ ROLE_DEFAULT_PERMISSIONS } = require('@tbi/shared-constants/permissions'));
-} catch (err) {
-  console.error('FATAL ERROR: Failed to load @tbi/shared-constants/permissions.', err);
-  process.exit(1);
-}
+let ROLE_DEFAULT_PERMISSIONS = {
+  ADMIN: [
+    'users:read', 'users:create', 'users:bulk_import', 'users:deactivate',
+    'users:reset_password', 'users:assign_role', 'users:grant_permission',
+    'events:read', 'events:create', 'events:update', 'events:close',
+    'applications:read_all', 'applications:review',
+    'attendance:generate_qr', 'attendance:mark_manual', 'attendance:read',
+    'chat:read', 'chat:write', 'chat:moderate',
+    'certificates:view_own', 'certificates:generate', 'certificates:revoke',
+    'analytics:platform_read', 'analytics:team_read', 'audit_logs:read'
+  ],
+  SUPER_ADMIN: []
+};
+
+import('../../../../../packages/shared-constants/permissions.js')
+  .then((m) => {
+    if (m?.ROLE_DEFAULT_PERMISSIONS) ROLE_DEFAULT_PERMISSIONS = m.ROLE_DEFAULT_PERMISSIONS;
+  })
+  .catch(() => {
+    import('@tbi/shared-constants/permissions')
+      .then((m) => {
+        if (m?.ROLE_DEFAULT_PERMISSIONS) ROLE_DEFAULT_PERMISSIONS = m.ROLE_DEFAULT_PERMISSIONS;
+      })
+      .catch((err) => console.warn('[ADMIN] Using fallback default permissions:', err?.message));
+  });
 
 const generateDefaultPassword = () => {
   const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';

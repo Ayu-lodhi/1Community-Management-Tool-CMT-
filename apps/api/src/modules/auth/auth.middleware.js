@@ -211,16 +211,31 @@ exports.requireTeam = (teamName) => {
   };
 };
 // Admin granular permission check (only checks if role is ADMIN)
-let ROLE_DEFAULT_PERMISSIONS = {};
-try {
-  ({ ROLE_DEFAULT_PERMISSIONS } = require('@tbi/shared-constants/permissions'));
-} catch (_) {
-  try {
-    ({ ROLE_DEFAULT_PERMISSIONS } = require('../../../../../packages/shared-constants/permissions.js'));
-  } catch (_) {
-    ROLE_DEFAULT_PERMISSIONS = { ADMIN: [] };
-  }
-}
+let ROLE_DEFAULT_PERMISSIONS = {
+  ADMIN: [
+    'users:read', 'users:create', 'users:bulk_import', 'users:deactivate',
+    'users:reset_password', 'users:assign_role', 'users:grant_permission',
+    'events:read', 'events:create', 'events:update', 'events:close',
+    'applications:read_all', 'applications:review',
+    'attendance:generate_qr', 'attendance:mark_manual', 'attendance:read',
+    'chat:read', 'chat:write', 'chat:moderate',
+    'certificates:view_own', 'certificates:generate', 'certificates:revoke',
+    'analytics:platform_read', 'analytics:team_read', 'audit_logs:read'
+  ],
+  SUPER_ADMIN: []
+};
+
+import('../../../../../packages/shared-constants/permissions.js')
+  .then((m) => {
+    if (m?.ROLE_DEFAULT_PERMISSIONS) ROLE_DEFAULT_PERMISSIONS = m.ROLE_DEFAULT_PERMISSIONS;
+  })
+  .catch(() => {
+    import('@tbi/shared-constants/permissions')
+      .then((m) => {
+        if (m?.ROLE_DEFAULT_PERMISSIONS) ROLE_DEFAULT_PERMISSIONS = m.ROLE_DEFAULT_PERMISSIONS;
+      })
+      .catch(() => {});
+  });
 
 exports.requireAdminPermission = (requiredPermission) => {
   return async (req, res, next) => {
