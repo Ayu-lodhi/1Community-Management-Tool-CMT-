@@ -1,4 +1,5 @@
 process.env.VERCEL = process.env.VERCEL || '1';
+const mongoose = require('mongoose');
 let app = null;
 let initError = null;
 
@@ -7,6 +8,44 @@ try {
 } catch (err) {
   initError = err;
   console.error('[API Serverless Init Error]:', err.message);
+}
+
+let cached = global.mongoose;
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null };
+}
+
+async function connectToDatabase() {
+  if (mongoose.connection?.readyState === 1) {
+    return mongoose.connection;
+  }
+  const uri = process.env.MONGODB_URI;
+  if (!uri) return null;
+
+  if (!cached.promise || mongoose.connection.readyState === 0 || mongoose.connection.readyState === 3) {
+    cached.promise = mongoose.connect(uri, { serverSelectionTimeoutMS: 8000 }).then((m) => {
+      cached.conn = m;
+      return m;
+    }).catch((err) => {
+      cached.promise = null;
+      throw err;
+    });
+  }
+
+  try {
+    cached.conn = await cached.promise;
+  } catch (_) {
+    cached.promise = null;
+  }
+
+  if (mongoose.connection.readyState === 2) {
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, 4000);
+      mongoose.connection.once('open', () => { clearTimeout(timer); resolve(); });
+      mongoose.connection.once('error', () => { clearTimeout(timer); resolve(); });
+    });
+  }
+  return mongoose.connection;
 }
 
 const sendJson = (res, statusCode, data) => {
@@ -18,7 +57,7 @@ const sendJson = (res, statusCode, data) => {
   return res.end(JSON.stringify(data));
 };
 
-const handler = (req, res) => {
+const handler = async (req, res) => {
   const url = req.url || '';
 
   if (initError) {
@@ -34,6 +73,7 @@ const handler = (req, res) => {
   }
 
   try {
+    await connectToDatabase();
     return app(req, res);
   } catch (err) {
     console.error('[API Serverless Request Error]:', err);
