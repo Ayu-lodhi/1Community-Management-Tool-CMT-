@@ -16,6 +16,7 @@ if (!cached) {
 }
 
 let lastDbError = null;
+let lastDbErrorStack = null;
 
 async function connectToDatabase() {
   if (mongoose.connection?.readyState === 1) {
@@ -28,10 +29,12 @@ async function connectToDatabase() {
     cached.promise = mongoose.connect(uri, { serverSelectionTimeoutMS: 8000 }).then((m) => {
       cached.conn = m;
       lastDbError = null;
+      lastDbErrorStack = null;
       return m;
     }).catch((err) => {
       cached.promise = null;
       lastDbError = err.message;
+      lastDbErrorStack = err.stack;
       console.error('[MongoDB Connect Error]:', err.message);
       throw err;
     });
@@ -42,13 +45,14 @@ async function connectToDatabase() {
   } catch (err) {
     cached.promise = null;
     lastDbError = err.message;
+    lastDbErrorStack = err.stack;
   }
 
   if (mongoose.connection.readyState === 2) {
     await new Promise((resolve) => {
       const timer = setTimeout(resolve, 4000);
       mongoose.connection.once('open', () => { clearTimeout(timer); resolve(); });
-      mongoose.connection.once('error', (err) => { clearTimeout(timer); lastDbError = err?.message || 'Error'; resolve(); });
+      mongoose.connection.once('error', (err) => { clearTimeout(timer); lastDbError = err?.message || 'Error'; lastDbErrorStack = err?.stack || null; resolve(); });
     });
   }
   return mongoose.connection;
@@ -72,6 +76,7 @@ const handler = async (req, res) => {
       readyState: mongoose.connection.readyState,
       connected: mongoose.connection.readyState === 1,
       lastDbError,
+      lastDbErrorStack,
       has_MONGODB_URI: Boolean(process.env.MONGODB_URI),
     });
   }
