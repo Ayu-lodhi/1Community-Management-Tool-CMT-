@@ -1745,7 +1745,7 @@ export const T1Dashboard = () => {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await api.get('/stats/t1');
+        const res = await api.get('/stats/t3');
         setStats(res.data.data);
       } catch (err) {
         console.error(err);
@@ -8143,7 +8143,7 @@ export const T3DashboardEnhanced = () => {
       try {
         const [eventsRes, statsRes] = await Promise.all([
           api.get('/events/me'),
-          api.get('/stats/t3'),
+          api.get('/stats/t2'),
         ]);
         setMyEvents(eventsRes.data.data);
         setStats(statsRes.data.data);
@@ -8305,7 +8305,7 @@ export const T2DashboardEnhanced = () => {
   useEffect(() => {
     (async () => {
       try {
-        const res = await api.get('/stats/t2');
+        const res = await api.get('/stats/t1');
         setStats(res.data.data);
       } catch (err) {
         console.error(err);
