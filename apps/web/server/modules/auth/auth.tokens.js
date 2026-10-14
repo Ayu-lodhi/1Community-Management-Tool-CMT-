@@ -30,9 +30,11 @@ const getSecretForPurpose = (purpose) => (purpose === 'refresh' ? getRefreshSecr
 exports.requiresMfa = async (role) => {
   if (process.env.ENFORCE_MFA !== 'true') return false;
   try {
+    // Relative file import: standardized for CommonJS server runtime compatibility
     const { PRIVILEGED_ROLES } = await import('../../../../../packages/shared-constants/roles.js');
     return PRIVILEGED_ROLES.includes(role);
-  } catch {
+  } catch (err) {
+    console.warn('[AUTH] Warning: Failed to load PRIVILEGED_ROLES from shared-constants, falling back to default:', err?.message);
     return ['SUPER_ADMIN', 'ADMIN'].includes(role);
   }
 };
