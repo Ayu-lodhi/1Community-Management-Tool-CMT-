@@ -540,6 +540,7 @@ export const Login = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          identifier: loginEmail,
           email: loginEmail,
           password: loginPassword,
           ...(captchaToken ? { 'g-recaptcha-response': captchaToken } : {}),
@@ -687,10 +688,10 @@ export const Login = () => {
 
             {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-3.5">
-              {/* Field 1: Username / Email */}
+              {/* Field 1: User ID or Email */}
               <div>
                 <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
-                  Username / Email
+                  User ID or Email
                 </label>
                 <div className="relative flex items-center bg-white border-[2.5px] border-[#1B5299] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
                   <span className="pl-3 text-slate-500 shrink-0">
@@ -700,7 +701,7 @@ export const Login = () => {
                     type="text"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Username / Email"
+                    placeholder="User ID or Email"
                     required
 
                     className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
@@ -8857,6 +8858,9 @@ export const ProfilePage = () => {
           <div className="flex-1">
             <h2 className="text-xl font-bold">{user.name}</h2>
             <p className="text-sm text-gray-500">{user.email}</p>
+            {user.userId && (
+              <p className="text-xs font-mono font-bold text-gray-700 mt-1">User ID: {user.userId}</p>
+            )}
             <span className="inline-block mt-2 text-xs px-2 py-1 rounded-full font-medium text-white" style={{ backgroundColor: cfg.color }}>{cfg.label}</span>
           </div>
         </div>
@@ -8873,6 +8877,12 @@ export const ProfilePage = () => {
 
         <form onSubmit={handleSave} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
+            {user.userId && (
+              <div className="col-span-2">
+                <label className="block text-sm font-medium mb-1.5">User ID</label>
+                <input value={user.userId} disabled readOnly className="w-full h-11 px-3 rounded-lg border border-gray-200 outline-none bg-gray-50 text-gray-700 font-mono text-sm font-bold" />
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium mb-1.5">Full Name</label>
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full h-11 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" />

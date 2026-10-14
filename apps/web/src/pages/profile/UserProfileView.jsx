@@ -162,6 +162,11 @@ export const UserProfileView = () => {
                   <h1 className="font-['Barlow_Condensed',sans-serif] font-black text-2xl sm:text-3xl uppercase tracking-tight text-[#1A1A1A]">
                     {targetUser?.name || 'User Profile'}
                   </h1>
+                  {targetUser?.userId && (
+                    <span className="px-2 py-0.5 text-xs font-['Space_Mono',monospace] font-bold bg-slate-800 text-white rounded-md border border-[#1A1A1A]">
+                      ID: {targetUser.userId}
+                    </span>
+                  )}
                   <span className="px-2 py-0.5 text-xs font-['Space_Mono',monospace] font-bold bg-[#1B5299] text-white rounded-md border border-[#1A1A1A]">
                     {ROLE_LABELS[targetUser?.role] || targetUser?.role || 'Member'}
                   </span>

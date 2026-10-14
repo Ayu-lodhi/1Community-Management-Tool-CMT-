@@ -30,7 +30,7 @@ const getSecretForPurpose = (purpose) => (purpose === 'refresh' ? getRefreshSecr
 exports.requiresMfa = async (role) => {
   if (process.env.ENFORCE_MFA !== 'true') return false;
   try {
-    const { PRIVILEGED_ROLES } = await import('../../../../../packages/shared-constants/roles.js');
+    const { PRIVILEGED_ROLES } = await import('@tbi/shared-constants/roles');
     return PRIVILEGED_ROLES.includes(role);
   } catch {
     return ['SUPER_ADMIN', 'ADMIN'].includes(role);
