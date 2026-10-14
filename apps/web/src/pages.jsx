@@ -318,6 +318,8 @@ const MENUS = {
       section: 'OPERATIONS', items: [
         { icon: Calendar, label: 'Events', to: '/admin/events' },
         { icon: UsersRound, label: 'Teams', to: '/admin/teams' },
+        { icon: Calendar, label: 'Workforce Roster', to: '/t3/workforce' },
+        { icon: FileCheck, label: 'Timesheet Approvals', to: '/t3/approvals' },
         { icon: FileCheck, label: 'Approval Requests', to: '/admin/applications' },
         { icon: MessageSquare, label: 'Team Chats', to: '/chat' },
         { icon: Bell, label: 'Announcements', to: '/announcements' },
@@ -352,6 +354,8 @@ const MENUS = {
       section: 'OPERATIONS', items: [
         { icon: Calendar, label: 'Events', to: '/admin/events' },
         { icon: UsersRound, label: 'Teams', to: '/admin/teams' },
+        { icon: Calendar, label: 'Workforce Roster', to: '/t3/workforce' },
+        { icon: FileCheck, label: 'Timesheet Approvals', to: '/t3/approvals' },
         { icon: FileCheck, label: 'Approval Requests', to: '/admin/applications' },
         { icon: MessageSquare, label: 'Team Chats', to: '/chat' },
         { icon: Bell, label: 'Announcements', to: '/announcements' },
@@ -369,10 +373,13 @@ const MENUS = {
     {
       section: 'MY WORKSPACE', items: [
         { icon: LayoutDashboard, label: 'Dashboard', to: '/t3' },
+        { icon: Calendar, label: 'Shift Calendar', to: '/t3/workforce' },
+        { icon: FileCheck, label: 'Timesheet Approvals', to: '/t3/approvals' },
         { icon: UsersRound, label: 'My Teams', to: '/t3/teams' },
         { icon: Users, label: 'Team Profiles', to: '/profile/team' },
         { icon: FileCheck, label: 'Approval Requests', to: '/t3/applications' },
         { icon: CheckCircle, label: 'Attendance', to: '/t3/attendance' },
+        { icon: Clock, label: 'My Schedule', to: '/my-workforce' },
         { icon: Clock, label: 'Timesheets', to: '/timesheets' },
       ]
     },
@@ -395,6 +402,7 @@ const MENUS = {
     {
       section: 'MY WORKSPACE', items: [
         { icon: LayoutDashboard, label: 'Dashboard', to: '/t2' },
+        { icon: Calendar, label: 'My Schedule & Timesheet', to: '/my-workforce' },
         { icon: Calendar, label: 'Browse Events', to: '/t2/events' },
         { icon: FileCheck, label: 'Approval Requests', to: '/t2/applications' },
         { icon: Clock, label: 'My Shifts', to: '/t2/shifts' },
@@ -419,6 +427,7 @@ const MENUS = {
     {
       section: 'MY WORKSPACE', items: [
         { icon: LayoutDashboard, label: 'Dashboard', to: '/t1' },
+        { icon: Calendar, label: 'My Schedule & Timesheet', to: '/my-workforce' },
         { icon: Calendar, label: 'Browse Events', to: '/t1/events' },
         { icon: FileCheck, label: 'Approval Requests', to: '/t1/applications' },
         { icon: QrCode, label: 'QR Check-In', to: '/t1/checkin' },

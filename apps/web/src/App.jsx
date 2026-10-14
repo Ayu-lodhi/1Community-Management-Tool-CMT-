@@ -16,6 +16,9 @@ import { MyProfilePage } from './pages/profile/MyProfilePage';
 import { UserProfileView } from './pages/profile/UserProfileView';
 import { TeamProfilesPage } from './pages/profile/TeamProfilesPage';
 import { ErrorBoundary } from './ErrorBoundary';
+import { T3WorkforcePage } from './pages/workforce/T3WorkforcePage';
+import { MyWorkforcePage } from './pages/workforce/MyWorkforcePage';
+import { T3ApprovalsPage } from './pages/workforce/T3ApprovalsPage';
 
 const RootRedirect = () => {
   const { user, initializing } = useAuth();
@@ -59,6 +62,8 @@ function App() {
 
             {/* T3 */}
             <Route path="/t3" element={<ProtectedRoute roles={['T3_EXECUTIVE']}><T3DashboardEnhanced /></ProtectedRoute>} />
+            <Route path="/t3/workforce" element={<ProtectedRoute roles={['T3_EXECUTIVE', 'ADMIN', 'SUPER_ADMIN']}><T3WorkforcePage /></ProtectedRoute>} />
+            <Route path="/t3/approvals" element={<ProtectedRoute roles={['T3_EXECUTIVE', 'ADMIN', 'SUPER_ADMIN']}><T3ApprovalsPage /></ProtectedRoute>} />
             <Route path="/t3/teams" element={<ProtectedRoute roles={['T3_EXECUTIVE']}><MyTeamsPage /></ProtectedRoute>} />
             <Route path="/t3/events/:id" element={<ProtectedRoute roles={['T3_EXECUTIVE']}><EventDetailPage /></ProtectedRoute>} />
             <Route path="/t3/applications" element={<ProtectedRoute roles={['T3_EXECUTIVE']}><ApplicationsPage /></ProtectedRoute>} />
@@ -91,6 +96,7 @@ function App() {
             <Route path="/profile/:userId" element={<ProtectedRoute><UserProfileView /></ProtectedRoute>} />
             <Route path="/preferences" element={<ProtectedRoute><PreferencesPage /></ProtectedRoute>} />
             <Route path="/timesheets" element={<ProtectedRoute><TimesheetPage /></ProtectedRoute>} />
+            <Route path="/my-workforce" element={<ProtectedRoute><MyWorkforcePage /></ProtectedRoute>} />
             <Route path="/admin/applications" element={<ProtectedRoute roles={['ADMIN', 'SUPER_ADMIN']}><ApplicationsPage /></ProtectedRoute>} />
             <Route path="/approval-requests" element={<ProtectedRoute><ApplicationsPage /></ProtectedRoute>} />
 
