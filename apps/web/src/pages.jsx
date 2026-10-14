@@ -543,7 +543,7 @@ export const Login = () => {
         throw new Error(`Server returned error status ${res.status}. Please try again.`);
       }
       if (!data.success) {
-        const err = new Error(data.message || 'Login failed');
+        const err = new Error(data.error || data.message || 'Login failed');
         err.status = res.status;
         throw err;
       }
@@ -564,7 +564,7 @@ export const Login = () => {
       const raw = err?.message || '';
       if (err.status === 409 || /already logged in/i.test(raw)) {
         setError(raw || 'This account is already logged in on another device');
-      } else if (/invalid|incorrect|credential|password|email/i.test(raw) && !/server|init|import|syntax|failed/i.test(raw)) {
+      } else if (/invalid|incorrect|credential|password|email/i.test(raw) && !/server|init|import|syntax|failed|validation|missing|config/i.test(raw)) {
         setError('Invalid username or password. Please verify your credentials.');
       } else if (/rate limit|too many/i.test(raw)) {
         setError('Too many login attempts. Please wait a moment and try again.');

@@ -13,7 +13,7 @@ const handler = (req, res) => {
   if (initError) {
     return res.status(503).json({
       success: false,
-      message: 'API service initializing or configuration error.',
+      message: initError.message || 'API service configuration error.',
       error: initError.message,
     });
   }
