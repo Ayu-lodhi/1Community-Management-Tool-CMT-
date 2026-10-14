@@ -19,7 +19,7 @@ This document describes environment configuration required for production deploy
 ### Database & Caching
 | Variable | Production Value / Format | Description |
 |---|---|---|
-| `MONGODB_URI` | `mongodb+srv://user:pass@cluster.mongodb.net/dbname` | Authenticated MongoDB connection string. Never use fallback values. |
+| `MONGODB_URI` | `mongodb+srv://<cluster-host>/dbname` | Authenticated MongoDB connection string. Never use fallback values. |
 | `REDIS_CACHE_URL` | `rediss://user:pass@host:port/0` | Dedicated Redis instance for caching. |
 | `REDIS_PUBSUB_URL` | `rediss://user:pass@host:port/1` | Dedicated Redis instance for Socket.io pub/sub. |
 | `REDIS_QUEUE_URL` | `rediss://user:pass@host:port/2` | Dedicated Redis instance for background worker queues. |

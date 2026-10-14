@@ -17,7 +17,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -28,14 +28,20 @@ jobs:
           find apps/api/src apps/api/scripts apps/workers/src -name '*.js' -print0 \
             | xargs -0 -n1 node --check
 
+      - name: Run unit tests
+        run: |
+          node -r ./apps/api/test-setup.js --test apps/api/src/__tests__/*.unit.test.js
+          node --test apps/web/src/__tests__/*.test.js
+          node --test apps/web/server/modules/auth/__tests__/*.unit.test.js
+
       - name: Build web
         run: npm run build --workspace=@tbi/web
         env:
           VITE_API_URL: https://api.example.invalid
           VITE_RECAPTCHA_SITE_KEY: dummy
 
-      - name: Guard against forbidden files
+      - name: Guard against secrets and sensitive files
         run: |
-          bad=$(git ls-files | grep -Ei '(\.md$|\.markdown$|__tests__|\.test\.js$|\.spec\.js$|\.pem$|\.key$|(^|/)\.env($|\.))' | grep -v '^\.env\.example$' || true)
+          bad=$(git ls-files | grep -Ei '(\.pem$|\.key$|(^|/)\.env($|\.))' | grep -v '\.env\.example$' || true)
           if [ -n "$bad" ]; then echo "Forbidden files tracked:"; echo "$bad"; exit 1; fi
           if git grep -nE 'AKIA[0-9A-Z]{16}|BEGIN (RSA |EC )?PRIVATE KEY' -- . ; then echo "Possible secret found"; exit 1; fi
