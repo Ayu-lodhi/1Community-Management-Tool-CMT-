@@ -33,6 +33,10 @@ const envSchema = Joi.object({
  * and logs ONLY variable names, never sensitive values or secrets.
  */
 function validateEnvironment(env = process.env) {
+  if (env.VERCEL || !env.REDIS_CACHE_URL) {
+    env.ALLOW_NO_REDIS = 'true';
+  }
+
   const { error, value } = envSchema.validate(env, { abortEarly: false });
 
   if (error) {
@@ -43,6 +47,13 @@ function validateEnvironment(env = process.env) {
     console.error(
       `FATAL CONFIG ERROR: Startup environment validation failed. Missing or invalid variables: ${uniqueFields.join(', ')}`
     );
+    if (env.VERCEL) {
+      const err = new Error(
+        `Startup environment validation failed. Missing or invalid variables: ${uniqueFields.join(', ')}`
+      );
+      err.missingVars = uniqueFields;
+      throw err;
+    }
     process.exit(1);
   }
 
