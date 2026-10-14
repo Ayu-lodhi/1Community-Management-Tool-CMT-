@@ -49,8 +49,9 @@ function validateEnvironment(env = process.env) {
     );
     const isServerless = Boolean(env.VERCEL || process.env.VERCEL || process.env.VERCEL_ENV || process.env.NOW_REGION);
     if (isServerless) {
+      const details = error.details.map((d) => `${d.context?.key || d.path.join('.')}: ${d.message.replace(/"/g, '')}`);
       const err = new Error(
-        `Startup environment validation failed. Missing or invalid variables: ${uniqueFields.join(', ')}`
+        `Startup environment validation failed: ${details.join('; ')}`
       );
       err.missingVars = uniqueFields;
       throw err;
