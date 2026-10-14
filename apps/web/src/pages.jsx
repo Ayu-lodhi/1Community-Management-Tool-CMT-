@@ -534,7 +534,13 @@ export const Login = () => {
       try {
         data = await res.json();
       } catch {
-        throw new Error('Unable to connect to the server. Please try again shortly.');
+        if (res.status === 503) {
+          throw new Error('Database or server initializing (503). Please retry in 5 seconds.');
+        }
+        if (res.status === 404) {
+          throw new Error('API route not found (404). Please check server routing.');
+        }
+        throw new Error(`Server returned error status ${res.status}. Please try again.`);
       }
       if (!data.success) {
         const err = new Error(data.message || 'Login failed');
@@ -602,7 +608,13 @@ export const Login = () => {
       try {
         data = await res.json();
       } catch {
-        throw new Error('Unable to connect to the server. Please try again shortly.');
+        if (res.status === 503) {
+          throw new Error('Database or server initializing (503). Please retry in 5 seconds.');
+        }
+        if (res.status === 404) {
+          throw new Error('API route not found (404). Please check server routing.');
+        }
+        throw new Error(`Server returned error status ${res.status}. Please try again.`);
       }
       if (!data.success) {
         throw new Error(data.message || 'MFA verification failed');
