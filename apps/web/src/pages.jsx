@@ -2,7 +2,7 @@
 // pages.jsx — All Page Components for TBI Management System
 // ====================================================================
 
-import React, { useState, createContext, useContext, useEffect, useRef, useCallback } from 'react';
+import React, { useState, createContext, useContext, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Navigate, NavLink, useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, ScrollText, Monitor, Settings, Shield, FileText,
