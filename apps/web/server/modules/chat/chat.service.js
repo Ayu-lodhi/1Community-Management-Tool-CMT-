@@ -3,7 +3,7 @@ const Message = require('./chat.model');
 const User = require('../admin/admin.model');
 const Team = require('../teams/teams.model');
 let PRIVILEGED_ROLES = ['SUPER_ADMIN', 'ADMIN'];
-import('../../../../../packages/shared-constants/roles.js')
+import('@tbi/shared-constants/roles')
   .then((m) => {
     if (m?.PRIVILEGED_ROLES) PRIVILEGED_ROLES = m.PRIVILEGED_ROLES;
   })
