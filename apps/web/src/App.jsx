@@ -15,20 +15,23 @@ import {
 import { MyProfilePage } from './pages/profile/MyProfilePage';
 import { UserProfileView } from './pages/profile/UserProfileView';
 import { TeamProfilesPage } from './pages/profile/TeamProfilesPage';
+import { ErrorBoundary } from './ErrorBoundary';
 
 const RootRedirect = () => {
   const { user, initializing } = useAuth();
   if (initializing) return null;
   if (!user) return <Navigate to="/login" replace />;
-  return <Navigate to={ROLES[user.role].route} replace />;
+  const roleConfig = ROLES[user?.role] || ROLES.T1_VOLUNTEER;
+  return <Navigate to={roleConfig?.route || '/login'} replace />;
 };
 
 function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <SocketProvider>
-          <Routes>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <SocketProvider>
+            <Routes>
             {/* Public / Auth */}
             <Route path="/login" element={<Login />} />
             <Route path="/change-password" element={<ChangePasswordPage />} />
@@ -97,7 +100,8 @@ function App() {
         </SocketProvider>
       </AuthProvider>
     </BrowserRouter>
-  );
+  </ErrorBoundary>
+);
 }
 
 export default App;

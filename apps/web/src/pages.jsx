@@ -944,8 +944,9 @@ export const Sidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const socket = useSocket();
-  const cfg = ROLES[user.role];
-  const menus = MENUS[user.role];
+  const role = user?.role || 'T1_VOLUNTEER';
+  const cfg = ROLES[role] || ROLES.T1_VOLUNTEER;
+  const menus = MENUS[role] || MENUS.T1_VOLUNTEER;
 
   // Dynamic notification counts
   const [badges, setBadges] = useState({
@@ -1123,7 +1124,7 @@ export const Sidebar = () => {
                 {cfg.code}
               </div>
               <div className="min-w-0">
-                <p className="text-white text-sm font-medium truncate">{user.name}</p>
+                <p className="text-white text-sm font-medium truncate">{user?.name || 'User'}</p>
                 <span className="text-[10px] text-white/80">{cfg.label}</span>
               </div>
             </div>
@@ -1213,7 +1214,8 @@ export const Topbar = () => {
   const { setMobileOpen } = useLayout();
   const navigate = useNavigate();
   const socket = useSocket();
-  const cfg = ROLES[user.role];
+  const role = user?.role || 'T1_VOLUNTEER';
+  const cfg = ROLES[role] || ROLES.T1_VOLUNTEER;
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
@@ -1296,13 +1298,13 @@ export const Topbar = () => {
         >
           <div
             className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-xs"
-            style={{ backgroundColor: cfg.color }}
+            style={{ backgroundColor: cfg?.color || '#0B5CAD' }}
           >
-            {user.name.charAt(0)}
+            {user?.name ? user.name.charAt(0) : 'U'}
           </div>
           <div className="hidden sm:block text-left">
-            <p className="text-sm font-medium text-gray-800 leading-tight truncate max-w-[120px]">{user.name}</p>
-            <p className="text-[11px] text-gray-500 leading-tight">{cfg.label}</p>
+            <p className="text-sm font-medium text-gray-800 leading-tight truncate max-w-[120px]">{user?.name || 'User'}</p>
+            <p className="text-[11px] text-gray-500 leading-tight">{cfg?.label || 'User'}</p>
           </div>
         </div>
       </div>
@@ -1453,7 +1455,8 @@ export const ProtectedRoute = ({ children, roles }) => {
 
   if (!user || !hasToken) return <Navigate to="/login" replace />;
   if (roles && !roles.includes(user.role)) {
-    return <Navigate to={ROLES[user.role].route} replace />;
+    const targetRoute = ROLES[user?.role]?.route || '/login';
+    return <Navigate to={targetRoute} replace />;
   }
   return <Layout>{children}</Layout>;
 };
@@ -1517,7 +1520,7 @@ export const AdminDashboard = () => {
     <div className="space-y-6">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Good morning, {user.name.split(' ')[0]}</h1>
+        <h1 className="text-2xl font-bold">Good morning, {user?.name ? user.name.split(' ')[0] : 'Admin'}</h1>
         <p className="text-gray-500">Here's what's happening today.</p>
       </div>
 
@@ -1685,7 +1688,7 @@ export const SuperAdminDashboard = () => {
     <div className="space-y-6">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Welcome, {user.name}</h1>
+        <h1 className="text-2xl font-bold">Welcome, {user?.name || 'Super Admin'}</h1>
         <p className="text-gray-500">Full system overview and admin actions.</p>
       </div>
 
@@ -1786,7 +1789,7 @@ export const T1Dashboard = () => {
     <div className="space-y-6 max-w-2xl">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Hi {user.name.split(' ')[0]}</h1>
+        <h1 className="text-2xl font-bold">Hi {user?.name ? user.name.split(' ')[0] : 'Executive'}</h1>
         <p className="text-gray-500">
           {todayStatusMessage}
 
@@ -8191,7 +8194,7 @@ export const T3DashboardEnhanced = () => {
     <div className="space-y-6">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Hi {user.name.split(' ')[0]}</h1>
+        <h1 className="text-2xl font-bold">Hi {user?.name ? user.name.split(' ')[0] : 'Associate'}</h1>
         <p className="text-gray-500">Your events and pending tasks</p>
       </div>
 
@@ -8340,7 +8343,7 @@ export const T2DashboardEnhanced = () => {
     <div className="space-y-6">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Hey {user.name.split(' ')[0]}</h1>
+        <h1 className="text-2xl font-bold">Hey {user?.name ? user.name.split(' ')[0] : 'Volunteer'}</h1>
         <p className="text-gray-500">Here's your activity</p>
       </div>
 
@@ -8988,7 +8991,8 @@ export const ProfilePage = () => {
     }
   };
 
-  const cfg = ROLES[user.role];
+  const role = user?.role || 'T1_VOLUNTEER';
+  const cfg = ROLES[role] || ROLES.T1_VOLUNTEER;
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
@@ -8996,7 +9000,7 @@ export const ProfilePage = () => {
         <p className="text-gray-500">Manage your account information and security</p>
       </div>
 
-      {user.role === 'ADMIN' && (
+      {user?.role === 'ADMIN' && (
         <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-3 text-amber-800 text-sm">
           <Info className="w-5 h-5 text-amber-600 shrink-0" />
           <div>
@@ -9007,12 +9011,12 @@ export const ProfilePage = () => {
 
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-center gap-5">
-          <div className="w-20 h-20 rounded-full flex items-center justify-center text-white text-2xl font-bold" style={{ backgroundColor: cfg.color }}>
-            {user.name.charAt(0)}
+          <div className="w-20 h-20 rounded-full flex items-center justify-center text-white text-2xl font-bold" style={{ backgroundColor: cfg?.color || '#0B5CAD' }}>
+            {user?.name ? user.name.charAt(0) : 'U'}
           </div>
           <div className="flex-1">
-            <h2 className="text-xl font-bold">{user.name}</h2>
-            <p className="text-sm text-gray-500">{user.email}</p>
+            <h2 className="text-xl font-bold">{user?.name || 'User'}</h2>
+            <p className="text-sm text-gray-500">{user?.email || ''}</p>
             {user.userId && (
               <p className="text-xs font-mono font-bold text-gray-700 mt-1">User ID: {user.userId}</p>
             )}
@@ -10331,7 +10335,7 @@ export const AnnouncementPopup = () => {
   useEffect(() => {
     if (!user) return;
 
-    const checkKey = `announcements_shown_${user._id}_${new Date().toDateString()}`;
+    const checkKey = `announcements_shown_${user?._id || user?.id || 'guest'}_${new Date().toDateString()}`;
     const alreadyShown = sessionStorage.getItem(checkKey);
     if (alreadyShown) return;
 
