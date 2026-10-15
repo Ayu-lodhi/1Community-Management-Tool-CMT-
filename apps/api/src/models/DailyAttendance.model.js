@@ -26,6 +26,16 @@ const dailyAttendanceSchema = new mongoose.Schema({
     reason: { type: String, maxlength: 500, default: '' },
   },
   rawPunchId: { type: mongoose.Schema.Types.ObjectId, ref: 'Attendance', default: null },
+  regularization: {
+    status: { type: String, enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED'], default: 'NONE', index: true },
+    targetStatus: { type: String, enum: ['PRESENT', 'HALF_DAY'], default: 'PRESENT' },
+    reason: { type: String, maxlength: 500, default: '' },
+    requestedAt: { type: Date, default: null },
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    reviewedByName: { type: String, default: '' },
+    reviewedAt: { type: Date, default: null },
+    reviewComment: { type: String, maxlength: 500, default: '' },
+  },
 }, { timestamps: true });
 
 dailyAttendanceSchema.index({ userId: 1, date: 1 }, { unique: true });

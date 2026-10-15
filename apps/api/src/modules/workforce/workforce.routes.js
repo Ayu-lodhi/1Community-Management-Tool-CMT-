@@ -41,6 +41,16 @@ router.post('/attendance/manual',
 );
 router.get('/attendance/register', restrictTo('T3_EXECUTIVE', 'ADMIN', 'SUPER_ADMIN'), requireTeamLeadOrAdmin, controller.getAttendanceRegister);
 
+// 4b. Attendance Regularization
+router.post('/attendance/regularize',
+  attendanceGenerateLimiter,
+  controller.requestRegularization
+);
+router.patch('/attendance/:id/regularize-review',
+  restrictTo('T3_EXECUTIVE', 'ADMIN', 'SUPER_ADMIN'),
+  controller.reviewRegularization
+);
+
 // 5. Day Timesheets
 router.post('/timesheets/day', checkMonthNotLocked('date'), controller.submitDayTimesheet);
 router.get('/timesheets/day/me', controller.getMyDayTimesheets);
@@ -51,6 +61,7 @@ router.patch('/timesheets/day/:id/review',
 );
 
 // 6. Month Lock & Unlock
+router.get('/month-lock/status', controller.getMonthLockStatus);
 router.post('/month-lock/lock', restrictTo('ADMIN', 'SUPER_ADMIN'), controller.lockMonth);
 router.post('/month-lock/unlock', restrictTo('SUPER_ADMIN'), controller.unlockMonth);
 

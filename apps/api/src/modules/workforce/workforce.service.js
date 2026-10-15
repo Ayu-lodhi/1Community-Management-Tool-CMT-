@@ -343,6 +343,107 @@ class WorkforceService {
     return records;
   }
 
+  // --- Attendance Regularization (Phase 5) ---
+  async requestRegularization(userId, data) {
+    const { attendanceId, targetStatus, reason } = data;
+    if (!attendanceId || !reason || !reason.trim()) {
+      throw new ValidationError('attendanceId and reason are required');
+    }
+
+    const attendance = await DailyAttendance.findById(attendanceId);
+    if (!attendance) throw new ValidationError('Attendance record not found');
+
+    if (attendance.userId.toString() !== userId.toString()) {
+      throw new AuthorizationError('You can only request regularization for your own attendance');
+    }
+
+    // Past 7 days window check
+    const diffDays = Math.floor((Date.now() - new Date(attendance.date + 'T00:00:00.000Z').getTime()) / (1000 * 3600 * 24));
+    if (diffDays > 7) {
+      throw new ValidationError('Regularization requests cannot be submitted for days older than 7 days');
+    }
+
+    // Max 3 regularizations per month per user
+    const month = attendance.date.slice(0, 7);
+    const existingCount = await DailyAttendance.countDocuments({
+      userId,
+      date: { $gte: `${month}-01`, $lte: `${month}-31` },
+      'regularization.status': { $in: ['PENDING', 'APPROVED'] },
+      _id: { $ne: attendance._id },
+    });
+
+    if (existingCount >= 3) {
+      throw new ValidationError(`Monthly regularization limit (3 requests per month) exceeded for ${month}`);
+    }
+
+    attendance.regularization = {
+      status: 'PENDING',
+      targetStatus: targetStatus === 'HALF_DAY' ? 'HALF_DAY' : 'PRESENT',
+      reason: reason.trim(),
+      requestedAt: new Date(),
+      reviewedBy: null,
+      reviewedByName: '',
+      reviewedAt: null,
+      reviewComment: '',
+    };
+
+    await attendance.save();
+
+    // Notify team lead
+    const team = await Team.findById(attendance.teamId).select('leadId');
+    if (team?.leadId && team.leadId.toString() !== userId.toString()) {
+      await notificationsService.notify(
+        team.leadId,
+        'system',
+        'Regularization Requested',
+        `${attendance.userName} requested attendance regularization for ${attendance.date}.`
+      ).catch(() => {});
+    }
+
+    return attendance;
+  }
+
+  async reviewRegularization(attendanceId, status, reviewComment, reviewer) {
+    if (!['APPROVED', 'REJECTED'].includes(status)) {
+      throw new ValidationError('Status must be either APPROVED or REJECTED');
+    }
+    const attendance = await DailyAttendance.findById(attendanceId);
+    if (!attendance) throw new ValidationError('Attendance record not found');
+
+    if (attendance.userId.toString() === reviewer.sub.toString()) {
+      throw new AuthorizationError('Cannot approve or reject your own regularization request');
+    }
+
+    const team = await Team.findById(attendance.teamId).select('leadId');
+    const isLead = team?.leadId && team.leadId.toString() === reviewer.sub.toString();
+    const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(reviewer.role);
+    if (!isLead && !isAdmin) {
+      throw new AuthorizationError('Only the team lead or an administrator can review regularization requests');
+    }
+
+    attendance.regularization.status = status;
+    attendance.regularization.reviewedBy = reviewer.sub;
+    attendance.regularization.reviewedByName = reviewer.name || 'Lead';
+    attendance.regularization.reviewedAt = new Date();
+    attendance.regularization.reviewComment = (reviewComment || '').trim();
+
+    if (status === 'APPROVED') {
+      attendance.originalStatus = attendance.originalStatus || attendance.status;
+      attendance.status = attendance.regularization.targetStatus || 'PRESENT';
+    }
+
+    await attendance.save();
+
+    await notificationsService.notify(
+      attendance.userId,
+      'system',
+      `Regularization ${status}`,
+      `Your attendance regularization request for ${attendance.date} was ${status.toLowerCase()} by ${reviewer.name || 'Lead'}.`
+    ).catch(() => {});
+
+    return attendance;
+  }
+
   // ====================================================================
   // 5. DAY TIMESHEETS
   // ====================================================================
@@ -546,6 +647,20 @@ class WorkforceService {
     }).catch(() => {});
 
     return lock;
+  }
+
+  async getMonthLockStatus(month) {
+    if (!/^\d{4}-\d{2}$/.test(month)) throw new ValidationError('month format must be YYYY-MM');
+    const lock = await MonthLock.findOne({ month }).lean();
+    return {
+      month,
+      isLocked: Boolean(lock?.isLocked),
+      lockedBy: lock?.lockedBy || null,
+      lockedAt: lock?.lockedAt || null,
+      unlockedBy: lock?.unlockedBy || null,
+      unlockedAt: lock?.unlockedAt || null,
+      unlockReason: lock?.unlockReason || '',
+    };
   }
 
   // ====================================================================

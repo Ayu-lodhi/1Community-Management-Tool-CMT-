@@ -24,6 +24,10 @@ export const T3ApprovalsPage = () => {
   // Detail modal
   const [detailItem, setDetailItem] = useState(null);
 
+  // Tab: 'timesheets' | 'regularizations'
+  const [activeTab, setActiveTab] = useState('timesheets');
+  const [regularizations, setRegularizations] = useState([]);
+
   useEffect(() => {
     const fetchTeams = async () => {
       try {
@@ -52,9 +56,25 @@ export const T3ApprovalsPage = () => {
     }
   }, [selectedTeamId, statusFilter]);
 
+  const loadRegularizations = useCallback(async () => {
+    if (!selectedTeamId) return;
+    try {
+      const monthKey = new Date().toISOString().slice(0, 7);
+      const res = await api.get(`/workforce/attendance/register?teamId=${selectedTeamId}&month=${monthKey}`);
+      const list = Array.isArray(res.data?.data) ? res.data.data : [];
+      setRegularizations(list.filter((r) => r.regularization && r.regularization.status === 'PENDING'));
+    } catch (err) {
+      console.error('Failed to load regularizations:', err);
+    }
+  }, [selectedTeamId]);
+
   useEffect(() => {
-    loadTimesheets();
-  }, [loadTimesheets]);
+    if (activeTab === 'regularizations') {
+      loadRegularizations();
+    } else {
+      loadTimesheets();
+    }
+  }, [activeTab, loadTimesheets, loadRegularizations]);
 
   const handleApprove = async (item) => {
     setActionLoadingId(item._id);
@@ -66,6 +86,44 @@ export const T3ApprovalsPage = () => {
       });
       setSuccessMsg(`Approved timesheet for ${item.userName} (${item.date})!`);
       await loadTimesheets();
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err) {
+      setErrorMsg(err.response?.data?.message || err.message);
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleApproveRegularization = async (item) => {
+    setActionLoadingId(item._id);
+    setErrorMsg('');
+    try {
+      await api.patch(`/workforce/attendance/${item._id}/regularize-review`, {
+        status: 'APPROVED',
+        reviewComment: 'Approved by team lead',
+      });
+      setSuccessMsg(`Approved attendance correction for ${item.userName} (${item.date})!`);
+      await loadRegularizations();
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err) {
+      setErrorMsg(err.response?.data?.message || err.message);
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleRejectRegularization = async (item) => {
+    const comment = window.prompt('Enter rejection reason for this correction request:');
+    if (comment === null) return;
+    setActionLoadingId(item._id);
+    setErrorMsg('');
+    try {
+      await api.patch(`/workforce/attendance/${item._id}/regularize-review`, {
+        status: 'REJECTED',
+        reviewComment: comment || 'Rejected by team lead',
+      });
+      setSuccessMsg(`Rejected regularization for ${item.userName}`);
+      await loadRegularizations();
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err) {
       setErrorMsg(err.response?.data?.message || err.message);
@@ -157,81 +215,154 @@ export const T3ApprovalsPage = () => {
         </div>
       )}
 
-      {/* Timesheets List */}
-      <div className="bg-white border-[2.5px] border-[#1A1A1A] shadow-[4px_4px_0px_0px_#1A1A1A] rounded-2xl overflow-hidden">
-        {timesheets.length === 0 ? (
-          <div className="p-12 text-center text-slate-400 font-['Space_Mono',monospace] text-xs">
-            No timesheets found matching filter &quot;{statusFilter}&quot;.
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-200">
-            {timesheets.map((item) => (
-              <div key={item._id} className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-slate-50/70 transition-colors">
-                <div className="space-y-1.5 flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-bold text-slate-900 text-sm font-['Space_Mono',monospace]">{item.userName}</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-bold font-['Space_Mono',monospace]">{item.userRole}</span>
-                    <span className="text-xs text-slate-500 font-['Space_Mono',monospace]">{item.date}</span>
-                    {item.isOvertime && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-bold font-['Space_Mono',monospace]">
-                        Overtime
+      {/* Switcher: Timesheet Approvals vs Attendance Regularizations */}
+      <div className="flex items-center gap-2 bg-white p-2 border-2 border-[#1A1A1A] rounded-xl font-['Space_Mono',monospace] text-xs">
+        <button
+          onClick={() => setActiveTab('timesheets')}
+          className={`px-3 py-1.5 font-bold rounded-lg transition-all cursor-pointer ${
+            activeTab === 'timesheets'
+              ? 'bg-[#1B5299] text-white border border-[#1A1A1A] shadow-[2px_2px_0px_0px_#1A1A1A]'
+              : 'text-slate-700 hover:bg-slate-100'
+          }`}
+        >
+          Timesheet Approvals ({timesheets.filter(t => t.status === 'SUBMITTED').length})
+        </button>
+        <button
+          onClick={() => setActiveTab('regularizations')}
+          className={`px-3 py-1.5 font-bold rounded-lg transition-all cursor-pointer ${
+            activeTab === 'regularizations'
+              ? 'bg-[#1B5299] text-white border border-[#1A1A1A] shadow-[2px_2px_0px_0px_#1A1A1A]'
+              : 'text-slate-700 hover:bg-slate-100'
+          }`}
+        >
+          Attendance Regularizations ({regularizations.length})
+        </button>
+      </div>
+
+      {/* Main List */}
+      <div className="bg-white border-[2.5px] border-[#1A1A1A] shadow-[4px_4px_0px_0px_#1A1A1A] rounded-2xl overflow-hidden font-['Space_Mono',monospace]">
+        {activeTab === 'regularizations' ? (
+          regularizations.length === 0 ? (
+            <div className="p-12 text-center text-slate-400 text-xs">
+              No pending attendance regularization requests for this team.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-200">
+              {regularizations.map((item) => (
+                <div key={item._id} className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-slate-50/70 transition-colors">
+                  <div className="space-y-1.5 flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-slate-900 text-sm">{item.userName}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-bold">{item.userRole}</span>
+                      <span className="text-xs text-slate-500">{item.date}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-bold">
+                        Current: {item.status}
                       </span>
-                    )}
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold font-['Space_Mono',monospace] ${
-                      item.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' :
-                      item.status === 'REJECTED' ? 'bg-red-100 text-red-800' :
-                      'bg-blue-100 text-blue-800'
-                    }`}>
-                      {item.status}
-                    </span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300 font-bold">
+                        Requested: {item.regularization?.targetStatus || 'PRESENT'}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-slate-700">
+                      Reason: &quot;<span className="font-medium text-slate-900">{item.regularization?.reason}</span>&quot;
+                    </p>
                   </div>
 
-                  <p className="text-xs text-slate-700 font-medium">
-                    Total Hours: <span className="font-bold">{item.totalHoursSpent}h</span> (Target Shift: {item.shiftHours}h) • {item.entries?.length || 0} Task Entries
-                  </p>
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 shrink-0 text-xs">
+                    <button
+                      onClick={() => handleApproveRegularization(item)}
+                      disabled={actionLoadingId === item._id}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg border border-[#1A1A1A] cursor-pointer disabled:opacity-50"
+                    >
+                      <Check className="w-3.5 h-3.5" /> Approve
+                    </button>
+                    <button
+                      onClick={() => handleRejectRegularization(item)}
+                      disabled={actionLoadingId === item._id}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg border border-[#1A1A1A] cursor-pointer disabled:opacity-50"
+                    >
+                      <X className="w-3.5 h-3.5" /> Reject
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : (
+          timesheets.length === 0 ? (
+            <div className="p-12 text-center text-slate-400 text-xs">
+              No timesheets found matching filter &quot;{statusFilter}&quot;.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-200">
+              {timesheets.map((item) => (
+                <div key={item._id} className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-slate-50/70 transition-colors">
+                  <div className="space-y-1.5 flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-slate-900 text-sm font-['Space_Mono',monospace]">{item.userName}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-bold font-['Space_Mono',monospace]">{item.userRole}</span>
+                      <span className="text-xs text-slate-500 font-['Space_Mono',monospace]">{item.date}</span>
+                      {item.isOvertime && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-bold font-['Space_Mono',monospace]">
+                          Overtime
+                        </span>
+                      )}
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold font-['Space_Mono',monospace] ${
+                        item.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' :
+                        item.status === 'REJECTED' ? 'bg-red-100 text-red-800' :
+                        'bg-blue-100 text-blue-800'
+                      }`}>
+                        {item.status}
+                      </span>
+                    </div>
 
-                  {/* Snippet of first task */}
-                  {item.entries?.[0] && (
-                    <p className="text-xs text-slate-500 truncate max-w-xl font-['Space_Mono',monospace]">
-                      Task 1: {item.entries[0].taskTitle} — &quot;{item.entries[0].note}&quot;
+                    <p className="text-xs text-slate-700 font-medium">
+                      Total Hours: <span className="font-bold">{item.totalHoursSpent}h</span> (Target Shift: {item.shiftHours}h) • {item.entries?.length || 0} Task Entries
                     </p>
-                  )}
-                </div>
 
-                {/* Actions */}
-                <div className="flex items-center gap-2 shrink-0 font-['Space_Mono',monospace] text-xs">
-                  <button
-                    onClick={() => setDetailItem(item)}
-                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg border border-slate-300"
-                  >
-                    View Breakdown
-                  </button>
+                    {item.entries?.[0] && (
+                      <p className="text-xs text-slate-500 truncate max-w-xl font-['Space_Mono',monospace]">
+                        Task 1: {item.entries[0].taskTitle} — &quot;{item.entries[0].note}&quot;
+                      </p>
+                    )}
+                  </div>
 
-                  {item.status === 'SUBMITTED' && (
-                    <>
-                      <button
-                        onClick={() => handleApprove(item)}
-                        disabled={actionLoadingId === item._id}
-                        className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg border border-[#1A1A1A] cursor-pointer disabled:opacity-50"
-                      >
-                        <Check className="w-3.5 h-3.5" /> Approve
-                      </button>
-                      <button
-                        onClick={() => {
-                          setRejectingItem(item);
-                          setRejectModalOpen(true);
-                        }}
-                        disabled={actionLoadingId === item._id}
-                        className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg border border-[#1A1A1A] cursor-pointer disabled:opacity-50"
-                      >
-                        <X className="w-3.5 h-3.5" /> Reject
-                      </button>
-                    </>
-                  )}
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 shrink-0 font-['Space_Mono',monospace] text-xs">
+                    <button
+                      onClick={() => setDetailItem(item)}
+                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg border border-slate-300"
+                    >
+                      View Breakdown
+                    </button>
+
+                    {item.status === 'SUBMITTED' && (
+                      <>
+                        <button
+                          onClick={() => handleApprove(item)}
+                          disabled={actionLoadingId === item._id}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg border border-[#1A1A1A] cursor-pointer disabled:opacity-50"
+                        >
+                          <Check className="w-3.5 h-3.5" /> Approve
+                        </button>
+                        <button
+                          onClick={() => {
+                            setRejectingItem(item);
+                            setRejectModalOpen(true);
+                          }}
+                          disabled={actionLoadingId === item._id}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg border border-[#1A1A1A] cursor-pointer disabled:opacity-50"
+                        >
+                          <X className="w-3.5 h-3.5" /> Reject
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )
         )}
       </div>
 

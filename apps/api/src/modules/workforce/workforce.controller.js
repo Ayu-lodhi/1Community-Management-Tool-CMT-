@@ -99,6 +99,24 @@ exports.getAttendanceRegister = async (req, res) => {
   }
 };
 
+exports.requestRegularization = async (req, res) => {
+  try {
+    const data = await service.requestRegularization(req.user.sub, req.body);
+    res.status(200).json({ success: true, message: 'Regularization requested successfully', data });
+  } catch (err) {
+    handleWorkforceError(res, err);
+  }
+};
+
+exports.reviewRegularization = async (req, res) => {
+  try {
+    const data = await service.reviewRegularization(req.params.id, req.body.status, req.body.reviewComment, req.user);
+    res.status(200).json({ success: true, message: `Regularization ${req.body.status.toLowerCase()}`, data });
+  } catch (err) {
+    handleWorkforceError(res, err);
+  }
+};
+
 // 5. Day Timesheets
 exports.submitDayTimesheet = async (req, res) => {
   try {
@@ -150,6 +168,15 @@ exports.unlockMonth = async (req, res) => {
   try {
     const data = await service.unlockMonth(req.body.month, req.body.reason, req.user);
     res.status(200).json({ success: true, message: `Month ${req.body.month} unlocked`, data });
+  } catch (err) {
+    handleWorkforceError(res, err);
+  }
+};
+
+exports.getMonthLockStatus = async (req, res) => {
+  try {
+    const data = await service.getMonthLockStatus(req.query.month);
+    res.status(200).json({ success: true, data });
   } catch (err) {
     handleWorkforceError(res, err);
   }

@@ -41,6 +41,10 @@ export const MyWorkforcePage = () => {
   ]);
   const [actionLoading, setActionLoading] = useState(false);
 
+  // Attendance Regularization state
+  const [regularizeModalOpen, setRegularizeModalOpen] = useState(false);
+  const [regularizeForm, setRegularizeForm] = useState({ attendanceId: '', date: '', targetStatus: 'PRESENT', reason: '' });
+
   const loadData = useCallback(async () => {
     try {
       const [assignRes, timesheetRes, attendRes] = await Promise.all([
@@ -98,6 +102,33 @@ export const MyWorkforcePage = () => {
   const totalLoggedHours = entries.reduce((sum, item) => sum + (Number(item.hoursSpent) || 0), 0);
   const shiftHours = selectedDayAssignment?.durationHours || 4;
   const isOvertime = totalLoggedHours > shiftHours;
+
+  const openRegularizeModal = (dayStr, att) => {
+    setRegularizeForm({
+      attendanceId: att?._id || '',
+      date: dayStr,
+      targetStatus: 'PRESENT',
+      reason: '',
+    });
+    setRegularizeModalOpen(true);
+  };
+
+  const handleRegularizeSubmit = async (e) => {
+    e.preventDefault();
+    setActionLoading(true);
+    setErrorMsg('');
+    try {
+      await api.post('/workforce/attendance/regularize', regularizeForm);
+      setSuccessMsg('Regularization request submitted to your lead!');
+      setRegularizeModalOpen(false);
+      await loadData();
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err) {
+      setErrorMsg(err.response?.data?.message || err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const handleSubmitTimesheet = async (e) => {
     e.preventDefault();
@@ -202,6 +233,15 @@ export const MyWorkforcePage = () => {
                       }`}>
                         {attendance ? attendance.status : 'No Check-In'}
                       </span>
+                      {isPast && attendance && attendance.status !== 'present' && (
+                        <button
+                          type="button"
+                          onClick={() => openRegularizeModal(day, attendance)}
+                          className="block text-[10px] text-[#1B5299] hover:underline font-bold mt-1 cursor-pointer"
+                        >
+                          Request Correction
+                        </button>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -366,6 +406,63 @@ export const MyWorkforcePage = () => {
                   className="px-4 py-2 bg-[#1B5299] hover:bg-[#15427C] text-white font-bold border-2 border-[#1A1A1A] shadow-[2px_2px_0px_0px_#1A1A1A] rounded-xl cursor-pointer disabled:opacity-50"
                 >
                   {actionLoading ? 'Submitting...' : 'Submit to Lead'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Request Attendance Regularization */}
+      {regularizeModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white border-[3px] border-[#1A1A1A] shadow-[6px_6px_0px_0px_#1A1A1A] rounded-2xl p-6 w-full max-w-md font-['Space_Mono',monospace] text-xs">
+            <div className="flex items-center justify-between mb-4 border-b pb-3 border-slate-200">
+              <h2 className="text-xl font-black font-['Barlow_Condensed',sans-serif] uppercase text-slate-900">
+                Attendance Correction ({regularizeForm.date})
+              </h2>
+              <button onClick={() => setRegularizeModalOpen(false)}><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleRegularizeSubmit} className="space-y-4">
+              <div>
+                <label className="block font-bold mb-1">Requested Status</label>
+                <select
+                  value={regularizeForm.targetStatus}
+                  onChange={(e) => setRegularizeForm({ ...regularizeForm, targetStatus: e.target.value })}
+                  className="w-full px-3 py-2 border-2 border-[#1A1A1A] rounded-lg outline-none bg-white font-bold"
+                >
+                  <option value="PRESENT">PRESENT</option>
+                  <option value="HALF_DAY">HALF DAY</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-bold mb-1">Reason for Request</label>
+                <textarea
+                  rows="3"
+                  required
+                  placeholder="Explain why your check-in was missed or late (minimum 10 characters)..."
+                  value={regularizeForm.reason}
+                  onChange={(e) => setRegularizeForm({ ...regularizeForm, reason: e.target.value })}
+                  className="w-full px-3 py-2 border-2 border-[#1A1A1A] rounded-lg outline-none"
+                />
+              </div>
+              <p className="text-[10px] text-slate-500">
+                Limit: Maximum 3 regularization requests permitted per calendar month within a 7-day window.
+              </p>
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setRegularizeModalOpen(false)}
+                  className="px-4 py-2 border-2 border-[#1A1A1A] rounded-xl font-bold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading || !regularizeForm.reason.trim()}
+                  className="px-4 py-2 bg-[#1B5299] hover:bg-[#15427C] text-white font-bold border-2 border-[#1A1A1A] shadow-[2px_2px_0px_0px_#1A1A1A] rounded-xl cursor-pointer disabled:opacity-50"
+                >
+                  {actionLoading ? 'Submitting...' : 'Submit Request'}
                 </button>
               </div>
             </form>

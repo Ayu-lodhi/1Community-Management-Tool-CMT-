@@ -411,4 +411,139 @@ describe('Workforce Module Unit Tests', () => {
     await restrictMiddleware({ user: { role: 'T3_EXECUTIVE' } }, mockRes, () => { nextCalled = true; });
     assert.equal(nextCalled, true, 'T3_EXECUTIVE must pass through restrictTo');
   });
+
+  test('Regularization: member requests regularization within 7 days', async (t) => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const mockAttendance = {
+      _id: id('a'),
+      userId: memberId,
+      userName: 'T1 Member',
+      teamId,
+      date: todayStr,
+      status: 'LATE',
+      regularization: { status: 'NONE' },
+      save: async () => mockAttendance,
+    };
+
+    t.mock.method(DailyAttendance, 'findById', async () => mockAttendance);
+    t.mock.method(DailyAttendance, 'countDocuments', async () => 0);
+    t.mock.method(Team, 'findById', () => ({ select: async () => ({ leadId }) }));
+
+    const res = await workforceService.requestRegularization(memberId, {
+      attendanceId: id('a'),
+      targetStatus: 'PRESENT',
+      reason: 'Biometric device network failure at entrance',
+    });
+
+    assert.equal(res.regularization.status, 'PENDING');
+    assert.equal(res.regularization.targetStatus, 'PRESENT');
+    assert.equal(res.status, 'LATE', 'Status remains unadjusted until lead approval');
+  });
+
+  test('Regularization: rejects request older than 7 days', async (t) => {
+    const pastAttendance = {
+      _id: id('a'),
+      userId: memberId,
+      date: '2026-09-01',
+    };
+
+    t.mock.method(DailyAttendance, 'findById', async () => pastAttendance);
+
+    await assert.rejects(
+      async () => {
+        await workforceService.requestRegularization(memberId, {
+          attendanceId: id('a'),
+          reason: 'Too late',
+        });
+      },
+      /older than 7 days/
+    );
+  });
+
+  test('Regularization: enforces max 3 regularizations per month', async (t) => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const mockAttendance = {
+      _id: id('a'),
+      userId: memberId,
+      date: todayStr,
+    };
+
+    t.mock.method(DailyAttendance, 'findById', async () => mockAttendance);
+    t.mock.method(DailyAttendance, 'countDocuments', async () => 3);
+
+    await assert.rejects(
+      async () => {
+        await workforceService.requestRegularization(memberId, {
+          attendanceId: id('a'),
+          reason: 'Fourth request',
+        });
+      },
+      /Monthly regularization limit \(3 requests per month\) exceeded/
+    );
+  });
+
+  test('Regularization Review: lead approves member request and updates status to PRESENT with audit trail', async (t) => {
+    const mockAttendance = {
+      _id: id('a'),
+      userId: memberId,
+      userName: 'T1 Member',
+      teamId,
+      date: '2026-10-20',
+      status: 'ABSENT',
+      originalStatus: null,
+      regularization: { status: 'PENDING', targetStatus: 'PRESENT' },
+      save: async () => mockAttendance,
+    };
+
+    t.mock.method(DailyAttendance, 'findById', async () => mockAttendance);
+    t.mock.method(Team, 'findById', () => ({ select: async () => ({ leadId }) }));
+
+    const reviewed = await workforceService.reviewRegularization(id('a'), 'APPROVED', 'Verified by team lead', {
+      sub: leadId.toString(),
+      role: 'T3_EXECUTIVE',
+      name: 'Mayank Lead',
+    });
+
+    assert.equal(reviewed.status, 'PRESENT', 'Status must be updated to targetStatus upon approval');
+    assert.equal(reviewed.originalStatus, 'ABSENT', 'Original status must be preserved for audit');
+    assert.equal(reviewed.regularization.status, 'APPROVED');
+  });
+
+  test('Regularization Review: team lead cannot self-approve own regularization request', async (t) => {
+    const mockAttendance = {
+      _id: id('a'),
+      userId: leadId,
+      teamId,
+      date: '2026-10-20',
+      status: 'LATE',
+      regularization: { status: 'PENDING' },
+    };
+
+    t.mock.method(DailyAttendance, 'findById', async () => mockAttendance);
+
+    await assert.rejects(
+      async () => {
+        await workforceService.reviewRegularization(id('a'), 'APPROVED', 'Self-approval', {
+          sub: leadId.toString(),
+          role: 'T3_EXECUTIVE',
+        });
+      },
+      /Cannot approve or reject your own regularization request/
+    );
+  });
+
+  test('MonthLock: correctly returns status and blocks locked dates', async (t) => {
+    t.mock.method(MonthLock, 'findOne', () => ({
+      lean: async () => ({
+        month: '2026-10',
+        isLocked: true,
+        lockedBy: id('1'),
+        lockedAt: new Date(),
+      }),
+    }));
+
+    const status = await workforceService.getMonthLockStatus('2026-10');
+    assert.equal(status.isLocked, true);
+    assert.equal(status.month, '2026-10');
+  });
 });
