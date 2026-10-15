@@ -1476,6 +1476,7 @@ export const ProtectedRoute = ({ children, roles }) => {
 // ====================================================================
 export const AdminDashboard = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [tiers, setTiers] = useState(null);
   const [trend, setTrend] = useState([]);
@@ -1528,9 +1529,37 @@ export const AdminDashboard = () => {
   return (
     <div className="space-y-6">
       <AnnouncementBanner />
-      <div>
-        <h1 className="text-2xl font-bold">Good morning, {user?.name ? user.name.split(' ')[0] : 'Admin'}</h1>
-        <p className="text-gray-500">Here's what's happening today.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Good morning, {user?.name ? user.name.split(' ')[0] : 'Admin'}</h1>
+          <p className="text-gray-500">Here's what's happening today.</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => navigate('/admin/users/new')}
+            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+          >
+            <UserPlus size={14} /> Add User
+          </button>
+          <button
+            onClick={() => navigate('/admin/users/bulk')}
+            className="px-3.5 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <Upload size={14} /> Bulk Import
+          </button>
+          <button
+            onClick={() => navigate('/t3/workforce')}
+            className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <Calendar size={14} /> Workforce Shifts
+          </button>
+          <button
+            onClick={() => navigate('/t3/approvals')}
+            className="px-3.5 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <CheckCircle size={14} /> Approvals
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -1651,22 +1680,27 @@ export const AdminDashboard = () => {
 
 export const SuperAdminDashboard = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [tiers, setTiers] = useState(null);
   const [trend, setTrend] = useState([]);
+  const [monthLock, setMonthLock] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     void (async () => {
       try {
-        const [statsRes, tiersRes, trendRes] = await Promise.all([
+        const currentMonth = new Date().toISOString().slice(0, 7);
+        const [statsRes, tiersRes, trendRes, lockRes] = await Promise.all([
           api.get('/stats/super-admin'),
           api.get('/stats/users-by-tier'),
           api.get('/stats/applications-trend'),
+          api.get(`/workforce/month-lock?month=${currentMonth}`).catch(() => ({ data: { data: null } })),
         ]);
         setStats(statsRes.data.data);
         setTiers(tiersRes.data.data);
         setTrend(trendRes.data.data);
+        setMonthLock(lockRes?.data?.data || null);
       } catch (err) {
         console.error(err);
       } finally {
@@ -1696,9 +1730,63 @@ export const SuperAdminDashboard = () => {
   return (
     <div className="space-y-6">
       <AnnouncementBanner />
-      <div>
-        <h1 className="text-2xl font-bold">Welcome, {user?.name || 'Super Admin'}</h1>
-        <p className="text-gray-500">Full system overview and admin actions.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Welcome, {user?.name || 'Super Admin'}</h1>
+          <p className="text-gray-500">Full system governance, security, and workforce overview.</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => navigate('/super-admin/admins')}
+            className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+          >
+            <Shield size={14} /> System Admins
+          </button>
+          <button
+            onClick={() => navigate('/super-admin/sessions')}
+            className="px-3.5 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <Key size={14} /> Active Sessions
+          </button>
+          <button
+            onClick={() => navigate('/super-admin/audit')}
+            className="px-3.5 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <ScrollText size={14} /> Audit Trail
+          </button>
+          <button
+            onClick={() => navigate('/t3/workforce')}
+            className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <Calendar size={14} /> Workforce Engine
+          </button>
+        </div>
+      </div>
+
+      {/* Central Month Lock Sentinel */}
+      <div className="bg-slate-900 text-white rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border border-slate-800 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${monthLock?.isLocked ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+            <Lock className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-sm">Central Month Lock Status</span>
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${monthLock?.isLocked ? 'bg-red-900/60 text-red-300 border border-red-700/50' : 'bg-emerald-900/60 text-emerald-300 border border-emerald-700/50'}`}>
+                {monthLock?.isLocked ? 'LOCKED' : 'OPEN / ACTIVE'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Cycle ({new Date().toISOString().slice(0, 7)}): {monthLock?.isLocked ? `Locked against retroactive changes by ${monthLock.lockedByName || 'Super Admin'}` : 'Attendance and timesheets are editable by leads and team members.'}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => navigate('/t3/workforce')}
+          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shrink-0"
+        >
+          Manage Lock & Shifts →
+        </button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -1804,6 +1892,25 @@ export const T1Dashboard = () => {
         </p>
       </div>
 
+      {/* My Workforce & Timesheet Shortcut */}
+      <div className="bg-gradient-to-r from-emerald-600 to-teal-700 rounded-xl p-5 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Calendar className="w-5 h-5 text-emerald-200" />
+            <h3 className="font-bold text-base">Weekly Shifts & Day Timesheet</h3>
+          </div>
+          <p className="text-xs text-emerald-100 max-w-md">
+            Check your scheduled shifts, assigned team tasks, and log your daily work hours with overtime reporting.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/my-workforce')}
+          className="px-4 py-2 bg-white text-emerald-800 font-semibold text-xs rounded-lg shadow-sm hover:bg-emerald-50 transition shrink-0 cursor-pointer"
+        >
+          Open Schedule & Timesheet →
+        </button>
+      </div>
+
       {/* Today's status card */}
       {safeStats.todayCheckedIn ? (
         <div className="bg-white rounded-xl border-l-4 border-l-green-500 border border-gray-200 p-6">
@@ -1877,15 +1984,15 @@ export const T1Dashboard = () => {
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
-        <Kpi label="Applications" value={stats.myApplications} />
-        <Kpi label="Approved" value={stats.approved} />
-        <Kpi label="Certificates" value={stats.certificates} />
+        <Kpi label="Applications" value={safeStats.myApplications ?? 0} />
+        <Kpi label="Approved" value={safeStats.approved ?? 0} />
+        <Kpi label="Certificates" value={safeStats.certificates ?? 0} />
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        <Kpi label="Pending" value={stats.pending} />
-        <Kpi label="Days Attended" value={stats.attendanceDays} />
-        <Kpi label="My Teams" value={stats.myTeams} />
+        <Kpi label="Pending" value={safeStats.pending ?? 0} />
+        <Kpi label="Days Attended" value={safeStats.attendanceDays ?? 0} />
+        <Kpi label="My Teams" value={safeStats.myTeams ?? 0} />
       </div>
     </div>
   );
@@ -8206,8 +8313,37 @@ export const T3DashboardEnhanced = () => {
     <div className="space-y-6">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Hi {user?.name ? user.name.split(' ')[0] : 'Associate'}</h1>
+        <h1 className="text-2xl font-bold">Hi {user?.name ? user.name.split(' ')[0] : 'Executive'}</h1>
         <p className="text-gray-500">Your events and pending tasks</p>
+      </div>
+
+      {/* Workforce Management Hub for T3 Lead */}
+      <div className="bg-gradient-to-r from-purple-900 to-indigo-900 text-white rounded-xl p-5 border border-purple-800 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Calendar className="w-5 h-5 text-purple-300" />
+              <h3 className="font-bold text-base">T3 Workforce Management Hub</h3>
+            </div>
+            <p className="text-xs text-purple-200 max-w-lg">
+              Manage your 7-day team shift matrix, assign inline tasks, review submitted timesheets, and approve attendance regularizations.
+            </p>
+          </div>
+          <div className="flex gap-2 flex-wrap shrink-0">
+            <button
+              onClick={() => navigate('/t3/workforce')}
+              className="px-3.5 py-2 bg-purple-500 hover:bg-purple-600 text-white font-semibold text-xs rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Calendar size={14} /> Shift Calendar & Register
+            </button>
+            <button
+              onClick={() => navigate('/t3/approvals')}
+              className="px-3.5 py-2 bg-white text-purple-900 hover:bg-purple-50 font-semibold text-xs rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <CheckCircle size={14} /> Approvals Inbox
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -8355,8 +8491,27 @@ export const T2DashboardEnhanced = () => {
     <div className="space-y-6">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Hey {user?.name ? user.name.split(' ')[0] : 'Volunteer'}</h1>
+        <h1 className="text-2xl font-bold">Hey {user?.name ? user.name.split(' ')[0] : 'Associate'}</h1>
         <p className="text-gray-500">Here's your activity</p>
+      </div>
+
+      {/* My Workforce & Timesheet Shortcut */}
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl p-5 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Calendar className="w-5 h-5 text-blue-200" />
+            <h3 className="font-bold text-base">Weekly Shifts & Day Timesheet</h3>
+          </div>
+          <p className="text-xs text-blue-100 max-w-md">
+            View your scheduled shifts, assigned team tasks, and log your daily work hours with overtime reporting.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/my-workforce')}
+          className="px-4 py-2 bg-white text-blue-800 font-semibold text-xs rounded-lg shadow-sm hover:bg-blue-50 transition shrink-0 cursor-pointer"
+        >
+          Open Schedule & Timesheet →
+        </button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
