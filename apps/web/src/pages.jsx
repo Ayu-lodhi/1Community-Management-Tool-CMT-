@@ -1695,7 +1695,7 @@ export const SuperAdminDashboard = () => {
           api.get('/stats/super-admin'),
           api.get('/stats/users-by-tier'),
           api.get('/stats/applications-trend'),
-          api.get(`/workforce/month-lock?month=${currentMonth}`).catch(() => ({ data: { data: null } })),
+          api.get(`/workforce/month-lock/status?month=${currentMonth}`).catch(() => ({ data: { data: null } })),
         ]);
         setStats(statsRes.data.data);
         setTiers(tiersRes.data.data);
