@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import api from '../../lib/api';
 import { useAuth } from '../../pages';
+import { AttendanceRegisterView } from './AttendanceRegisterView';
 
 export const T3WorkforcePage = () => {
   const { user } = useAuth();
@@ -418,137 +419,118 @@ export const T3WorkforcePage = () => {
         </div>
       </div>
 
-      {/* Main Grid: Responsive Card/Table Stack */}
-      <div className="bg-white border-[2.5px] border-[#1A1A1A] shadow-[4px_4px_0px_0px_#1A1A1A] rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-slate-800 border-collapse">
-            <thead className="bg-[#F5F2EB] border-b-2 border-[#1A1A1A] font-['Barlow_Condensed',sans-serif] text-xs uppercase tracking-wider font-black">
-              <tr>
-                <th className="py-3 px-4 border-r-2 border-[#1A1A1A] min-w-[160px]">Team Member</th>
-                {weekDays.map((day) => {
-                  const dateObj = new Date(day + 'T00:00:00');
-                  const weekdayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
-                  const dayNum = day.slice(8);
-                  const isToday = day === new Date().toISOString().split('T')[0];
-
-                  return (
-                    <th
-                      key={day}
-                      className={`py-2 px-2 text-center border-r border-slate-200 min-w-[120px] ${
-                        isToday ? 'bg-amber-100 text-[#1B5299]' : ''
-                      }`}
-                    >
-                      <div className="text-[10px] text-slate-500 font-['Space_Mono',monospace]">{weekdayName}</div>
-                      <div className="text-sm font-black">{dayNum}</div>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 font-['Space_Mono',monospace] text-xs">
-              {members.length === 0 ? (
+      {/* Switchable View: Shift Calendar vs Attendance Register */}
+      {activeView === 'register' ? (
+        <AttendanceRegisterView
+          selectedTeamId={selectedTeamId}
+          weekDays={weekDays}
+          user={user}
+        />
+      ) : (
+        <div className="bg-white border-[2.5px] border-[#1A1A1A] shadow-[4px_4px_0px_0px_#1A1A1A] rounded-2xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm text-slate-800 border-collapse">
+              <thead className="bg-[#F5F2EB] border-b-2 border-[#1A1A1A] font-['Barlow_Condensed',sans-serif] text-xs uppercase tracking-wider font-black">
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-slate-400">
-                    No members assigned to this team yet.
-                  </td>
+                  <th className="py-3 px-4 border-r-2 border-[#1A1A1A] min-w-[160px]">Team Member</th>
+                  {weekDays.map((day) => {
+                    const dateObj = new Date(day + 'T00:00:00');
+                    const weekdayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+                    const dayNum = day.slice(8);
+                    const isToday = day === new Date().toISOString().split('T')[0];
+
+                    return (
+                      <th
+                        key={day}
+                        className={`py-2 px-2 text-center border-r border-slate-200 min-w-[120px] ${
+                          isToday ? 'bg-amber-100 text-[#1B5299]' : ''
+                        }`}
+                      >
+                        <div className="text-[10px] text-slate-500 font-['Space_Mono',monospace]">{weekdayName}</div>
+                        <div className="text-sm font-black">{dayNum}</div>
+                      </th>
+                    );
+                  })}
                 </tr>
-              ) : (
-                members.map((member) => {
-                  const mId = member._id ? member._id.toString() : member.toString();
-                  const mName = member.name || 'Member';
-                  const mRole = member.role || 'T1';
+              </thead>
+              <tbody className="divide-y divide-slate-200 font-['Space_Mono',monospace] text-xs">
+                {members.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-8 text-center text-slate-400">
+                      No members assigned to this team yet.
+                    </td>
+                  </tr>
+                ) : (
+                  members.map((member) => {
+                    const mId = member._id ? member._id.toString() : member.toString();
+                    const mName = member.name || 'Member';
+                    const mRole = member.role || 'T1';
 
-                  return (
-                    <tr key={mId} className="hover:bg-slate-50/70">
-                      <td className="py-3 px-4 border-r-2 border-[#1A1A1A] bg-white font-medium">
-                        <div className="font-bold text-slate-900 truncate">{mName}</div>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-slate-100 text-slate-600 font-bold">
-                          {mRole.replace('T1_VOLUNTEER', 'T1').replace('T2_ASSOCIATE', 'T2').replace('T3_EXECUTIVE', 'T3')}
-                        </span>
-                      </td>
+                    return (
+                      <tr key={mId} className="hover:bg-slate-50/70">
+                        <td className="py-3 px-4 border-r-2 border-[#1A1A1A] bg-white font-medium">
+                          <div className="font-bold text-slate-900 truncate">{mName}</div>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-slate-100 text-slate-600 font-bold">
+                            {mRole.replace('T1_VOLUNTEER', 'T1').replace('T2_ASSOCIATE', 'T2').replace('T3_EXECUTIVE', 'T3')}
+                          </span>
+                        </td>
 
-                      {/* Day Columns */}
-                      {weekDays.map((day) => {
-                        const assignment = assignments.find(
-                          (a) => a.userId.toString() === mId && a.date === day
-                        );
-                        const reg = registerRecords.find(
-                          (r) => r.userId.toString() === mId && r.date === day
-                        );
+                        {/* Day Columns */}
+                        {weekDays.map((day) => {
+                          const assignment = assignments.find(
+                            (a) => a.userId.toString() === mId && a.date === day
+                          );
+                          const reg = registerRecords.find(
+                            (r) => r.userId.toString() === mId && r.date === day
+                          );
 
-                        return (
-                          <td key={day} className="py-2 px-2 border-r border-slate-200 align-top">
-                            {assignment ? (
-                              <div className="bg-blue-50 border border-blue-200 rounded-lg p-1.5 space-y-1">
-                                <div className="font-bold text-blue-900 text-[11px] truncate">
-                                  {assignment.shiftName}
+                          return (
+                            <td key={day} className="py-2 px-2 border-r border-slate-200 align-top">
+                              {assignment ? (
+                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-1.5 space-y-1">
+                                  <div className="font-bold text-blue-900 text-[11px] truncate">
+                                    {assignment.shiftName}
+                                  </div>
+                                  <div className="text-[10px] text-blue-700 flex items-center gap-1">
+                                    <Clock className="w-2.5 h-2.5" />
+                                    <span>{assignment.startTime}–{assignment.endTime}</span>
+                                  </div>
                                 </div>
-                                <div className="text-[10px] text-blue-700 flex items-center gap-1">
-                                  <Clock className="w-2.5 h-2.5" />
-                                  <span>{assignment.startTime}–{assignment.endTime}</span>
-                                </div>
-
-                                {/* Status Badge (click to mark in register view) */}
+                              ) : (
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    setMarkForm({
+                                    setAssignForm({
                                       userId: mId,
-                                      userName: mName,
+                                      shiftTemplateId: shiftTemplates[0]?._id || '',
                                       date: day,
-                                      status: reg?.status || 'PRESENT',
-                                      reason: '',
+                                      taskIds: [],
+                                      repeatWeekly: false,
                                     });
-                                    setManualMarkModalOpen(true);
+                                    setShowCustomTask(false);
+                                    setCustomTaskTitle('');
+                                    setCustomTaskDesc('');
+                                    setCustomTaskError('');
+                                    setAssignModalOpen(true);
                                   }}
-                                  className={`w-full mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold text-center border cursor-pointer ${
-                                    reg?.status === 'PRESENT'
-                                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                                      : reg?.status === 'LATE'
-                                      ? 'bg-amber-100 text-amber-800 border-amber-300'
-                                      : reg?.status === 'ABSENT'
-                                      ? 'bg-red-100 text-red-800 border-red-300'
-                                      : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
-                                  }`}
-                                  title="Click to mark attendance"
+                                  className="w-full h-full py-4 text-center text-slate-300 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg border border-dashed border-slate-200 transition-colors cursor-pointer"
+                                  title={`Assign shift to ${mName} on ${day}`}
                                 >
-                                  {reg?.status || 'Mark Attendance'}
+                                  <Plus className="w-4 h-4 mx-auto" />
                                 </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setAssignForm({
-                                    userId: mId,
-                                    shiftTemplateId: shiftTemplates[0]?._id || '',
-                                    date: day,
-                                    taskIds: [],
-                                    repeatWeekly: false,
-                                  });
-                                  setShowCustomTask(false);
-                                  setCustomTaskTitle('');
-                                  setCustomTaskDesc('');
-                                  setCustomTaskError('');
-                                  setAssignModalOpen(true);
-                                }}
-                                className="w-full h-full py-4 text-center text-slate-300 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg border border-dashed border-slate-200 transition-colors cursor-pointer"
-                                title={`Assign shift to ${mName} on ${day}`}
-                              >
-                                <Plus className="w-4 h-4 mx-auto" />
-                              </button>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* MODAL 1: Create Shift Template */}
       {shiftModalOpen && (
