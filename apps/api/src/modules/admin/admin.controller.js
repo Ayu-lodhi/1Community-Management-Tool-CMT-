@@ -96,7 +96,7 @@ exports.deleteUser = async (req, res) => {
     await adminService.deleteUser(req.params.id, req.user.sub);
     res.status(200).json({ success: true, message: 'User deleted' });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    res.status(error.statusCode || error.status || 400).json({ success: false, message: error.message });
   }
 };
 
@@ -200,7 +200,7 @@ exports.resetUserSession = async (req, res) => {
 
 exports.updateUserRole = async (req, res) => {
   try {
-    const { role } = req.body;
+    const { role, reason } = req.body;
     if (!role) {
       return res.status(400).json({ success: false, message: 'Role is required' });
     }
@@ -208,11 +208,12 @@ exports.updateUserRole = async (req, res) => {
       req.params.id,
       role,
       req.user,
-      req.ip || req.headers['x-forwarded-for']
+      req.ip || req.headers['x-forwarded-for'],
+      reason
     );
     res.status(200).json({ success: true, message: 'User role updated', data: result });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    res.status(error.statusCode || error.status || 400).json({ success: false, message: error.message });
   }
 };
 

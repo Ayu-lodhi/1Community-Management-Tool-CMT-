@@ -2382,8 +2382,15 @@ export const UserManagement = () => {
                   <option value="T1_VOLUNTEER">T1 Volunteer</option>
                   <option value="T2_ASSOCIATE">T2 Associate</option>
                   <option value="T3_EXECUTIVE">T3 Executive</option>
+                  {canManageAccess && <option value="ADMIN">Admin</option>}
                 </select>
               </div>
+              {form.role === 'ADMIN' && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-start gap-2">
+                  <Shield size={14} className="mt-0.5 flex-shrink-0" />
+                  <span>Admin accounts receive standard default administrative permissions upon creation. Custom permission overrides can be configured immediately after creation using &ldquo;Manage Permissions&rdquo;.</span>
+                </div>
+              )}
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 flex items-start gap-2">
                 <Info size={14} className="mt-0.5 flex-shrink-0" />
                 <span>Login credentials will be emailed to the user automatically.</span>
@@ -9833,8 +9840,8 @@ export const ToggleSwitch = ({ checked, onChange }) => (
 // ====================================================================
 export const AddUserPage = () => {
   const navigate = useNavigate();
-
-
+  const { user: currentUser } = useAuth();
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
 
   const [form, setForm] = useState({
     name: '',
@@ -9867,6 +9874,7 @@ export const AddUserPage = () => {
     { value: 'T1_VOLUNTEER', label: 'T1 Volunteer', desc: 'Event helper, applies to shifts', icon: 'T1', color: 'bg-green-100 text-green-700 border-green-300' },
     { value: 'T2_ASSOCIATE', label: 'T2 Associate', desc: 'Team coordinator, assists T1s', icon: 'T2', color: 'bg-blue-100 text-blue-700 border-blue-300' },
     { value: 'T3_EXECUTIVE', label: 'T3 Executive', desc: 'Senior lead, manages teams', icon: 'T3', color: 'bg-purple-100 text-purple-700 border-purple-300' },
+    ...(isSuperAdmin ? [{ value: 'ADMIN', label: 'Admin', desc: 'System administrator with custom grants', icon: 'AD', color: 'bg-orange-100 text-orange-700 border-orange-300' }] : []),
   ];
 
   if (created) {
