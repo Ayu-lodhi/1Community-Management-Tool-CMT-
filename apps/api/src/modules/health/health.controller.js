@@ -29,11 +29,7 @@ async function checkRedisInstance(client) {
 async function getHealth(req, res) {
   if (mongoose.connection.readyState !== 1 && process.env.MONGODB_URI) {
     try {
-      let uri = process.env.MONGODB_URI;
-      if (uri.startsWith('mongodb+srv://') && uri.includes('-shard-')) {
-        uri = 'mongodb://ayushlodhi88_db_user:9IzJqRATQYl1hERt@ac-gkiqwag-shard-00-00.wiv7fca.mongodb.net:27017,ac-gkiqwag-shard-00-01.wiv7fca.mongodb.net:27017,ac-gkiqwag-shard-00-02.wiv7fca.mongodb.net:27017/tbi_db?ssl=true&replicaSet=atlas-6g5sz6-shard-0&authSource=admin&appName=Cluster0';
-      }
-      await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
+      await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
     } catch (_) {}
   }
   const mongoOk = mongoose.connection.readyState === 1 ? 'ok' : 'not-ok';

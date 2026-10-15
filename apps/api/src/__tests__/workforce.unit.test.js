@@ -50,22 +50,87 @@ describe('Workforce Module Unit Tests', () => {
     assert.equal(template.breakMinutes, 0);
   });
 
-  test('Task: creates team task', async (t) => {
+  test('Task: a T3 creates a task for their own team and ignores teamId in request body', async (t) => {
+    t.mock.method(Team, 'findOne', () => ({
+      _id: teamId,
+      name: 'Alpha Team',
+      leadId,
+    }));
+
+    let capturedDetails = null;
+    t.mock.method(AuditLog, 'create', async (entry) => {
+      capturedDetails = entry;
+      return true;
+    });
+
+    t.mock.method(Task, 'findOne', async () => null);
     t.mock.method(Task, 'create', async (doc) => ({
       _id: id('b'),
       ...doc,
     }));
 
+    // T3 attempts to pass a different otherTeamId in the request body
+    const otherTeamId = id('8');
     const task = await workforceService.createTask({
       title: 'Setup Event Hall',
       description: 'Arrange sound checks and chairs',
-      teamId,
+      teamId: otherTeamId,
       dueDate: '2026-10-20',
       priority: 'HIGH',
-    }, leadId);
+    }, { sub: leadId.toString(), role: 'T3_EXECUTIVE', name: 'Lead' });
 
     assert.equal(task.title, 'Setup Event Hall');
     assert.equal(task.priority, 'HIGH');
+    assert.equal(task.teamId.toString(), teamId.toString(), 'T3 task teamId must be derived from their own team, ignoring request body');
+    assert.ok(capturedDetails, 'Audit log entry must be written on task creation');
+    assert.equal(capturedDetails.action, 'TASK_CREATE');
+    assert.equal(capturedDetails.performedBy.toString(), leadId.toString());
+  });
+
+  test('Task: T3 of another team or not leading any team is rejected', async (t) => {
+    t.mock.method(Team, 'findOne', () => null);
+
+    await assert.rejects(
+      async () => {
+        await workforceService.createTask({
+          title: 'Unauthorized Task',
+          teamId,
+        }, { sub: id('9').toString(), role: 'T3_EXECUTIVE' });
+      },
+      /Only team leads can create tasks/
+    );
+  });
+
+  test('Task: missing or over-long title is rejected', async (t) => {
+    t.mock.method(Team, 'findOne', () => ({ _id: teamId, leadId }));
+
+    await assert.rejects(
+      async () => {
+        await workforceService.createTask({ title: '   ', teamId }, { sub: leadId.toString(), role: 'T3_EXECUTIVE' });
+      },
+      /title is required/
+    );
+
+    await assert.rejects(
+      async () => {
+        await workforceService.createTask({ title: 'A'.repeat(101), teamId }, { sub: leadId.toString(), role: 'T3_EXECUTIVE' });
+      },
+      /title must not exceed 100 characters/
+    );
+  });
+
+  test('Task: idempotency returns existing task on quick double submit', async (t) => {
+    t.mock.method(Team, 'findOne', () => ({ _id: teamId, leadId }));
+
+    const existingDoc = { _id: id('b'), title: 'Duplicate Check', teamId, createdAt: new Date() };
+    t.mock.method(Task, 'findOne', async () => existingDoc);
+
+    const task = await workforceService.createTask({
+      title: 'Duplicate Check',
+      teamId,
+    }, { sub: leadId.toString(), role: 'T3_EXECUTIVE' });
+
+    assert.equal(task._id, existingDoc._id, 'Must return existing task without re-inserting');
   });
 
   test('ShiftAssignment: blocks assignment if user is not in the team', async (t) => {
@@ -310,5 +375,40 @@ describe('Workforce Module Unit Tests', () => {
     assert.ok(csv.includes("'\+123456789@test.com"), 'Cell starting with + must be prepended with single quote');
     assert.ok(csv.includes("'\-DANGEROUS"), 'Cell starting with - must be prepended with single quote');
     assert.ok(csv.includes("'\@ADMIN"), 'Cell starting with @ must be prepended with single quote');
+  });
+
+  test('Workforce Routes: POST /tasks rejects non-lead callers (T1/T2)', async () => {
+    const workforceRoutes = require('../modules/workforce/workforce.routes');
+    const taskPostRoute = workforceRoutes.stack.find(
+      (layer) => layer.route && layer.route.path === '/tasks' && layer.route.methods.post
+    );
+    assert.ok(taskPostRoute, 'POST /tasks route must exist');
+
+    // The restrictTo middleware is in the route stack
+    const restrictMiddleware = taskPostRoute.route.stack[1].handle;
+    let statusSet = null;
+    let jsonSent = null;
+    const mockRes = {
+      status: (code) => {
+        statusSet = code;
+        return { json: (data) => { jsonSent = data; } };
+      },
+    };
+
+    // Call as T1_VOLUNTEER -> 403
+    await restrictMiddleware({ user: { role: 'T1_VOLUNTEER' } }, mockRes, () => {});
+    assert.equal(statusSet, 403, 'T1_VOLUNTEER must be rejected with 403');
+    assert.equal(jsonSent?.success, false);
+
+    // Call as T2_ASSOCIATE -> 403
+    statusSet = null;
+    await restrictMiddleware({ user: { role: 'T2_ASSOCIATE' } }, mockRes, () => {});
+    assert.equal(statusSet, 403, 'T2_ASSOCIATE must be rejected with 403');
+    assert.equal(jsonSent?.success, false);
+
+    // Call as T3_EXECUTIVE passes through to next
+    let nextCalled = false;
+    await restrictMiddleware({ user: { role: 'T3_EXECUTIVE' } }, mockRes, () => { nextCalled = true; });
+    assert.equal(nextCalled, true, 'T3_EXECUTIVE must pass through restrictTo');
   });
 });

@@ -12,7 +12,12 @@ router.post('/shifts/templates', restrictTo('T3_EXECUTIVE', 'ADMIN', 'SUPER_ADMI
 router.get('/shifts/templates', controller.getShiftTemplates);
 
 // 2. Tasks
-router.post('/tasks', restrictTo('T3_EXECUTIVE', 'ADMIN', 'SUPER_ADMIN'), requireTeamLeadOrAdmin, controller.createTask);
+router.post('/tasks',
+  attendanceGenerateLimiter,
+  restrictTo('T3_EXECUTIVE', 'ADMIN', 'SUPER_ADMIN'),
+  requireTeamLeadOrAdmin,
+  controller.createTask
+);
 router.get('/tasks', controller.getTasks);
 
 // 3. Shift Assignments

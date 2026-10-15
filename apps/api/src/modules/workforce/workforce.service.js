@@ -19,6 +19,13 @@ const sanitizeCsvCell = (val) => {
   return `"${str.replace(/"/g, '""')}"`;
 };
 
+const escapeHtml = (value) => (!value ? '' : String(value)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;'));
+
 class WorkforceService {
 
   // ====================================================================
@@ -56,20 +63,87 @@ class WorkforceService {
   // ====================================================================
   // 2. TASKS
   // ====================================================================
-  async createTask(data, creatorId) {
-    const { title, description, teamId, dueDate, priority } = data;
-    if (!title || !teamId) {
-      throw new ValidationError('title and teamId are required');
+  async createTask(data, caller) {
+    const creatorId = caller?.sub || caller?._id || caller;
+    const callerRole = caller?.role;
+    const callerName = caller?.name || caller?.email || 'User';
+
+    let effectiveTeamId;
+
+    if (callerRole === 'T3_EXECUTIVE') {
+      // Team is taken from the logged-in T3's own team, never from the request body
+      const ledTeam = await Team.findOne({ leadId: creatorId });
+      if (!ledTeam) {
+        throw new AuthorizationError('Only team leads can create tasks');
+      }
+      effectiveTeamId = ledTeam._id;
+    } else if (['ADMIN', 'SUPER_ADMIN'].includes(callerRole)) {
+      // ADMIN and SUPER_ADMIN must pass a team explicitly and it must exist
+      if (!data.teamId) {
+        throw new ValidationError('teamId is required for administrators');
+      }
+      const team = await Team.findById(data.teamId);
+      if (!team) {
+        throw new ValidationError('Team not found');
+      }
+      effectiveTeamId = team._id;
+    } else if (data.teamId) {
+      effectiveTeamId = data.teamId;
+    } else {
+      throw new ValidationError('teamId is required');
     }
 
-    return await Task.create({
-      title: title.trim(),
-      description: (description || '').trim(),
-      teamId,
+    const { title, description, dueDate, priority, source } = data;
+    if (!title || typeof title !== 'string' || !title.trim()) {
+      throw new ValidationError('title is required');
+    }
+
+    const trimmedTitle = title.trim();
+    if (trimmedTitle.length > 100) {
+      throw new ValidationError('title must not exceed 100 characters');
+    }
+
+    const trimmedDesc = typeof description === 'string' ? description.trim() : '';
+    if (trimmedDesc.length > 500) {
+      throw new ValidationError('description must not exceed 500 characters');
+    }
+
+    const sanitizedTitle = escapeHtml(trimmedTitle);
+    const sanitizedDesc = escapeHtml(trimmedDesc);
+
+    // Idempotency: no duplicate on quick double submit within 10 seconds
+    const tenSecondsAgo = new Date(Date.now() - 10000);
+    const existingTask = await Task.findOne({
+      teamId: effectiveTeamId,
+      title: sanitizedTitle,
+      createdBy: creatorId,
+      createdAt: { $gte: tenSecondsAgo },
+    });
+    if (existingTask) {
+      return existingTask;
+    }
+
+    const task = await Task.create({
+      title: sanitizedTitle,
+      description: sanitizedDesc,
+      teamId: effectiveTeamId,
       dueDate: dueDate || null,
       priority: priority || 'MEDIUM',
+      source: source === 'assign_modal' ? 'assign_modal' : 'standard',
       createdBy: creatorId,
     });
+
+    await AuditLog.create({
+      action: 'TASK_CREATE',
+      performedBy: creatorId,
+      performedByName: callerName,
+      targetId: task._id,
+      targetType: 'Task',
+      details: { title: sanitizedTitle, teamId: effectiveTeamId },
+      timestamp: new Date(),
+    }).catch(() => {});
+
+    return task;
   }
 
   async getTasks(teamId, status) {

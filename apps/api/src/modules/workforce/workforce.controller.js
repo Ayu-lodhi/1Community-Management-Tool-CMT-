@@ -27,7 +27,7 @@ exports.getShiftTemplates = async (req, res) => {
 // 2. Tasks
 exports.createTask = async (req, res) => {
   try {
-    const data = await service.createTask(req.body, req.user.sub);
+    const data = await service.createTask(req.body, req.user);
     res.status(201).json({ success: true, data });
   } catch (err) {
     handleWorkforceError(res, err);
