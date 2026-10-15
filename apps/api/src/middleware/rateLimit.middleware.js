@@ -91,14 +91,14 @@ const handleRedisLimiter = async (req, res, next, redisKey, windowMs, maxRequest
       }
     }
   } catch (err) {
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_NO_REDIS !== 'true') {
       logger.error(`Redis limiter failed for ${redisKey}, cannot fallback to memory in production`, { error: err.message });
       return res.status(500).json({ success: false, message: 'Rate limiter unavailable' });
     }
     logger.warn(`Redis limiter failed for ${redisKey}; falling back to memory`, { error: err.message });
   }
 
-  if (process.env.NODE_ENV === 'production') {
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_NO_REDIS !== 'true') {
     logger.error(`Redis is not ready for ${redisKey}, cannot fallback to memory in production`);
     return res.status(500).json({ success: false, message: 'Rate limiter unavailable' });
   }

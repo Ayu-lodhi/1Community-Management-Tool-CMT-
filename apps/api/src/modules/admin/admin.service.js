@@ -6,13 +6,31 @@ const { recordPermissionAudit } = require('../../core/utils/auditLogger');
 const User = require('./admin.model');
 const { getNextUserId } = require('../../services/userId.service');
 const { sendWelcomeEmail, sendPasswordResetLinkEmail, sendProfileUpdatedEmail, sendPasswordChangedEmail, sendEmailChangedEmail } = require('../../services/email.service');
-let ROLE_DEFAULT_PERMISSIONS;
-try {
-  ({ ROLE_DEFAULT_PERMISSIONS } = require('@tbi/shared-constants/permissions'));
-} catch (err) {
-  console.error('FATAL ERROR: Failed to load @tbi/shared-constants/permissions.', err);
-  process.exit(1);
-}
+let ROLE_DEFAULT_PERMISSIONS = {
+  ADMIN: [
+    'users:read', 'users:create', 'users:bulk_import', 'users:deactivate',
+    'users:reset_password', 'users:assign_role', 'users:grant_permission',
+    'events:read', 'events:create', 'events:update', 'events:close',
+    'applications:read_all', 'applications:review',
+    'attendance:generate_qr', 'attendance:mark_manual', 'attendance:read',
+    'chat:read', 'chat:write', 'chat:moderate',
+    'certificates:view_own', 'certificates:generate', 'certificates:revoke',
+    'analytics:platform_read', 'analytics:team_read', 'audit_logs:read'
+  ],
+  SUPER_ADMIN: []
+};
+
+import('../../../../../packages/shared-constants/permissions.js')
+  .then((m) => {
+    if (m?.ROLE_DEFAULT_PERMISSIONS) ROLE_DEFAULT_PERMISSIONS = m.ROLE_DEFAULT_PERMISSIONS;
+  })
+  .catch(() => {
+    import('@tbi/shared-constants/permissions')
+      .then((m) => {
+        if (m?.ROLE_DEFAULT_PERMISSIONS) ROLE_DEFAULT_PERMISSIONS = m.ROLE_DEFAULT_PERMISSIONS;
+      })
+      .catch((err) => console.warn('[ADMIN] Using fallback default permissions:', err?.message));
+  });
 
 const generateDefaultPassword = () => {
   const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -56,7 +74,7 @@ exports.createUser = async (data, callerRole = null) => {
   });
 
   // Send welcome email (awaited for serverless reliability)
-  let emailDelivery = { sent: false };
+  let emailDelivery = { sent: false, error: null };
   try {
     const emailResult = await sendWelcomeEmail({
       to: user.email,
@@ -66,7 +84,8 @@ exports.createUser = async (data, callerRole = null) => {
       loginUrl: LOGIN_URL,
       userId: user.userId,
     });
-    emailDelivery = { sent: emailResult?.success !== false, error: emailResult?.error || null };
+    const sent = emailResult?.success !== false && Boolean(emailResult?.success);
+    emailDelivery = { sent, error: emailResult?.error || null };
   } catch (err) {
     console.error('Welcome email failed:', err.message);
     emailDelivery = { sent: false, error: err.message };
@@ -74,7 +93,7 @@ exports.createUser = async (data, callerRole = null) => {
 
   const userObj = user.toObject ? user.toObject({ virtuals: false }) : { ...user };
   delete userObj.password;
-  return { user: userObj, tempPassword, emailDelivery };
+  return { user: userObj, tempPassword, emailSent: emailDelivery.sent, emailDelivery };
 };
 
 exports.bulkCreateUsers = async (rows, callerRole = null) => {
@@ -91,12 +110,13 @@ exports.bulkCreateUsers = async (rows, callerRole = null) => {
         err.statusCode = 403;
         throw err;
       }
-      const { user } = await exports.createUser(row, callerRole);
+      const { user, emailSent } = await exports.createUser(row, callerRole);
       succeeded++;
       results.push({
         line,
         email: row.email,
         status: 'created',
+        emailSent,
         user: {
           _id: user._id,
           userId: user.userId,
@@ -256,12 +276,54 @@ exports.reactivateUser = async (id, adminId) => {
   };
 };
 
-// C7: deleteUser — guard against Super Admin and self-delete
+// C7: deleteUser — guard against Super Admin and self-delete with cascading cleanup
 exports.deleteUser = async (id, adminId) => {
   const user = await User.findById(id);
   if (!user) throw new Error('User not found');
   if (user.role === 'SUPER_ADMIN') throw new Error('Cannot delete a Super Admin account');
   if (id.toString() === adminId?.toString()) throw new Error('You cannot delete your own account');
+
+  // Enforce prior revocation
+  if (user.isActive) {
+    const err = new Error('User must be revoked before deletion. Please revoke access first.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Prevent deleting an active team lead
+  const Team = require('../teams/teams.model');
+  const ledTeam = await Team.findOne({ leadId: id });
+  if (ledTeam) {
+    const err = new Error(`Cannot delete user while they are designated as lead for team "${ledTeam.name}". Please reassign the team lead first.`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Cascade cleanup of related personal data and dangling references
+  const Profile = require('../profile/profile.model');
+  const Notification = require('../notifications/notifications.model');
+  const ChatRoom = require('../chat/chatRoom.model');
+  const Event = require('../events/events.model');
+  const ShiftAssignment = require('../../models/ShiftAssignment.model');
+
+  // 1. Remove profile and notifications
+  await Profile.deleteOne({ user: id }).catch(() => {});
+  await Notification.deleteMany({ userId: id }).catch(() => {});
+
+  // 2. Remove from team memberships
+  await Team.updateMany({ members: id }, { $pull: { members: id } }).catch(() => {});
+
+  // 3. Remove from chat room participants
+  await ChatRoom.updateMany({ participants: id }, { $pull: { participants: id } }).catch(() => {});
+
+  // 4. Remove from event members
+  await Event.updateMany({ 'members.userId': id }, { $pull: { members: { userId: id } } }).catch(() => {});
+
+  // 5. Remove future shift assignments
+  const today = new Date().toISOString().split('T')[0];
+  await ShiftAssignment.deleteMany({ userId: id, date: { $gte: today } }).catch(() => {});
+
+  // 6. Delete user document and invalidate cached permissions
   await User.findByIdAndDelete(id);
   await invalidateUserPermissions(id);
   return user;
@@ -418,19 +480,55 @@ exports.resetUserSession = async (id) => {
 };
 
 // ROLE UPDATE — with audit log & immediate permission cache invalidation
-exports.updateUserRole = async (targetUserId, newRole, adminUser, ipAddress = null) => {
+exports.updateUserRole = async (targetUserId, newRole, adminUser, ipAddress = null, reason = '') => {
   const VALID_ROLES = ['SUPER_ADMIN', 'ADMIN', 'T3_EXECUTIVE', 'T2_ASSOCIATE', 'T1_VOLUNTEER'];
   if (!VALID_ROLES.includes(newRole)) throw new Error('Invalid role specified');
 
   const user = await User.findById(targetUserId);
   if (!user) throw new Error('User not found');
+
+  if (adminUser?.role !== 'SUPER_ADMIN') {
+    const err = new Error('Only Super Admins can modify user roles');
+    err.statusCode = 403;
+    err.status = 403;
+    throw err;
+  }
+
   if (user.role === 'SUPER_ADMIN' && adminUser.sub !== user._id.toString()) {
     throw new Error('Only the account holder can modify Super Admin role');
   }
 
   const oldRole = user.role;
+
+  // Prevent demoting the last Super Admin
+  if (oldRole === 'SUPER_ADMIN' && newRole !== 'SUPER_ADMIN') {
+    const superAdminCount = await User.countDocuments({ role: 'SUPER_ADMIN' });
+    if (superAdminCount <= 1) {
+      const err = new Error('Cannot demote the last Super Admin in the system');
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+
   user.role = newRole;
   await user.save();
+
+  // If demoted from T3_EXECUTIVE, unassign from team lead
+  if (oldRole === 'T3_EXECUTIVE' && (newRole === 'T1_VOLUNTEER' || newRole === 'T2_ASSOCIATE')) {
+    const Team = require('../teams/teams.model');
+    const ledTeam = await Team.findOne({ leadId: user._id });
+    if (ledTeam) {
+      await Team.updateOne({ _id: ledTeam._id }, { $set: { leadId: null } });
+      await recordPermissionAudit({
+        performedBy: adminUser.sub,
+        targetId: ledTeam._id,
+        targetType: 'Team',
+        action: 'TEAM_LEAD_UNASSIGNED_ON_DEMOTION',
+        oldValue: { leadId: user._id },
+        newValue: { leadId: null, demotedUser: user._id, newRole },
+      }).catch(() => {});
+    }
+  }
 
   await invalidateUserPermissions(user._id);
 
@@ -441,7 +539,7 @@ exports.updateUserRole = async (targetUserId, newRole, adminUser, ipAddress = nu
     targetType: 'User',
     action: 'USER_ROLE_CHANGED',
     oldValue: { role: oldRole },
-    newValue: { role: newRole },
+    newValue: { role: newRole, reason },
     ipAddress,
   });
 

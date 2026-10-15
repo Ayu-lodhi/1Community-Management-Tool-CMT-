@@ -1,4 +1,14 @@
 const authService = require('./auth.service');
+const captchaService = require('../../services/captcha.service');
+
+exports.getCaptcha = async (req, res) => {
+  try {
+    const challenge = await captchaService.createCaptchaChallenge();
+    res.status(200).json({ success: true, data: challenge });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to generate CAPTCHA challenge' });
+  }
+};
 
 exports.login = async (req, res) => {
   try {

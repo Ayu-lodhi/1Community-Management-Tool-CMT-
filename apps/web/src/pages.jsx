@@ -2,7 +2,7 @@
 // pages.jsx — All Page Components for TBI Management System
 // ====================================================================
 
-import React, { useState, createContext, useContext, useEffect, useRef, useCallback } from 'react';
+import React, { useState, createContext, useContext, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Navigate, NavLink, useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, ScrollText, Monitor, Settings, Shield, FileText,
@@ -318,6 +318,8 @@ const MENUS = {
       section: 'OPERATIONS', items: [
         { icon: Calendar, label: 'Events', to: '/admin/events' },
         { icon: UsersRound, label: 'Teams', to: '/admin/teams' },
+        { icon: Calendar, label: 'Workforce Roster', to: '/t3/workforce' },
+        { icon: FileCheck, label: 'Timesheet Approvals', to: '/t3/approvals' },
         { icon: FileCheck, label: 'Approval Requests', to: '/admin/applications' },
         { icon: MessageSquare, label: 'Team Chats', to: '/chat' },
         { icon: Bell, label: 'Announcements', to: '/announcements' },
@@ -352,6 +354,8 @@ const MENUS = {
       section: 'OPERATIONS', items: [
         { icon: Calendar, label: 'Events', to: '/admin/events' },
         { icon: UsersRound, label: 'Teams', to: '/admin/teams' },
+        { icon: Calendar, label: 'Workforce Roster', to: '/t3/workforce' },
+        { icon: FileCheck, label: 'Timesheet Approvals', to: '/t3/approvals' },
         { icon: FileCheck, label: 'Approval Requests', to: '/admin/applications' },
         { icon: MessageSquare, label: 'Team Chats', to: '/chat' },
         { icon: Bell, label: 'Announcements', to: '/announcements' },
@@ -369,10 +373,13 @@ const MENUS = {
     {
       section: 'MY WORKSPACE', items: [
         { icon: LayoutDashboard, label: 'Dashboard', to: '/t3' },
+        { icon: Calendar, label: 'Shift Calendar', to: '/t3/workforce' },
+        { icon: FileCheck, label: 'Timesheet Approvals', to: '/t3/approvals' },
         { icon: UsersRound, label: 'My Teams', to: '/t3/teams' },
         { icon: Users, label: 'Team Profiles', to: '/profile/team' },
         { icon: FileCheck, label: 'Approval Requests', to: '/t3/applications' },
         { icon: CheckCircle, label: 'Attendance', to: '/t3/attendance' },
+        { icon: Clock, label: 'My Schedule', to: '/my-workforce' },
         { icon: Clock, label: 'Timesheets', to: '/timesheets' },
       ]
     },
@@ -395,6 +402,7 @@ const MENUS = {
     {
       section: 'MY WORKSPACE', items: [
         { icon: LayoutDashboard, label: 'Dashboard', to: '/t2' },
+        { icon: Calendar, label: 'My Schedule & Timesheet', to: '/my-workforce' },
         { icon: Calendar, label: 'Browse Events', to: '/t2/events' },
         { icon: FileCheck, label: 'Approval Requests', to: '/t2/applications' },
         { icon: Clock, label: 'My Shifts', to: '/t2/shifts' },
@@ -419,6 +427,7 @@ const MENUS = {
     {
       section: 'MY WORKSPACE', items: [
         { icon: LayoutDashboard, label: 'Dashboard', to: '/t1' },
+        { icon: Calendar, label: 'My Schedule & Timesheet', to: '/my-workforce' },
         { icon: Calendar, label: 'Browse Events', to: '/t1/events' },
         { icon: FileCheck, label: 'Approval Requests', to: '/t1/applications' },
         { icon: QrCode, label: 'QR Check-In', to: '/t1/checkin' },
@@ -481,58 +490,41 @@ const DemoLoginBar = import.meta.env.DEV
 export const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mfaChallenge, setMfaChallenge] = useState(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [captchaChallenge, setCaptchaChallenge] = useState(null);
+  const [captchaAnswer, setCaptchaAnswer] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showMuralOnMobile, setShowMuralOnMobile] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState('');
-  const captchaContainerRef = useRef(null);
-  const captchaWidgetIdRef = useRef(null);
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const logoutReason = new URLSearchParams(location.search).get('reason');
-  const SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
 
-  // Load reCAPTCHA script and render widget
-  useEffect(() => {
-    if (!SITE_KEY) return;
-    const SCRIPT_ID = 'recaptcha-script';
-    const renderWidget = () => {
-      if (captchaContainerRef.current && captchaWidgetIdRef.current === null && window.grecaptcha) {
-        captchaWidgetIdRef.current = window.grecaptcha.render(captchaContainerRef.current, {
-          sitekey: SITE_KEY,
-          callback: (token) => setCaptchaToken(token),
-          'expired-callback': () => setCaptchaToken(''),
-          'error-callback': () => setCaptchaToken(''),
-        });
+  const fetchCaptcha = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/captcha`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setCaptchaChallenge(json.data);
+        setCaptchaAnswer('');
       }
-    };
-    if (!document.getElementById(SCRIPT_ID)) {
-      const script = document.createElement('script');
-      script.id = SCRIPT_ID;
-      script.src = 'https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit';
-      script.async = true;
-      script.defer = true;
-      window.onRecaptchaLoad = renderWidget;
-      document.head.appendChild(script);
-    } else if (window.grecaptcha?.render) {
-      renderWidget();
-    } else {
-      window.onRecaptchaLoad = renderWidget;
+    } catch (err) {
+      console.error('Failed to load CAPTCHA challenge:', err);
     }
-    return () => {
-      // Cleanup: reset widget ref so it can re-render if component re-mounts
-      captchaWidgetIdRef.current = null;
-    };
-  }, [SITE_KEY]);
+  }, []);
+
+  useEffect(() => {
+    fetchCaptcha();
+  }, [fetchCaptcha]);
 
   const performLogin = async (loginEmail, loginPassword) => {
     setError('');
     setLoading(true);
     try {
-      // Reject early if CAPTCHA is enabled but token not yet obtained
-      if (SITE_KEY && !captchaToken) {
-        setError('Please complete the CAPTCHA before signing in.');
+      if (captchaChallenge && !captchaAnswer.trim()) {
+        setError('Please enter the security verification code.');
         setLoading(false);
         return;
       }
@@ -543,19 +535,37 @@ export const Login = () => {
           identifier: loginEmail,
           email: loginEmail,
           password: loginPassword,
-          ...(captchaToken ? { 'g-recaptcha-response': captchaToken } : {}),
+          captchaId: captchaChallenge?.captchaId,
+          captchaAnswer: captchaAnswer.trim(),
         }),
       });
       let data;
       try {
         data = await res.json();
       } catch {
-        throw new Error('Unable to connect to the server. Please try again shortly.');
+        if (res.status === 503) {
+          throw new Error('Database or server initializing (503). Please retry in 5 seconds.');
+        }
+        if (res.status === 404) {
+          throw new Error('API route not found (404). Please check server routing.');
+        }
+        throw new Error(`Server returned error status ${res.status}. Please try again.`);
       }
       if (!data.success) {
-        const err = new Error(data.message || 'Login failed');
+        const err = new Error(data.error || data.message || 'Login failed');
         err.status = res.status;
         throw err;
+      }
+      if (data.data?.mfaRequired && data.data?.challengeToken) {
+        setMfaChallenge(data.data.challengeToken);
+        setMfaCode('');
+        setLoading(false);
+        return;
+      }
+      if (data.data?.mustChangePassword && data.data?.passwordChangeToken) {
+        sessionStorage.setItem('tbi_token', data.data.passwordChangeToken);
+        navigate('/change-password', { replace: true, state: { forced: true } });
+        return;
       }
       login(data.data.user, data.data.accessToken);
       navigate(ROLES[data.data.user.role].route);
@@ -563,22 +573,18 @@ export const Login = () => {
       const raw = err?.message || '';
       if (err.status === 409 || /already logged in/i.test(raw)) {
         setError(raw || 'This account is already logged in on another device');
-      } else if (/invalid|incorrect|credential|password|email/i.test(raw) && !/server|init|import|syntax|failed/i.test(raw)) {
+      } else if (/invalid|incorrect|credential|password|email/i.test(raw) && !/server|init|import|syntax|failed|validation|missing|config/i.test(raw)) {
         setError('Invalid username or password. Please verify your credentials.');
       } else if (/rate limit|too many/i.test(raw)) {
         setError('Too many login attempts. Please wait a moment and try again.');
       } else if (/inactive|blocked|disabled|suspended/i.test(raw)) {
         setError('Your account is inactive. Please contact the administrator.');
       } else if (/captcha/i.test(raw)) {
-        setError('CAPTCHA verification failed. Please try again.');
+        setError(raw || 'CAPTCHA verification failed. Please try again.');
       } else {
         setError(raw || 'Unable to sign in right now. Please try again in a few moments.');
       }
-      // Reset CAPTCHA widget so user can try again
-      if (SITE_KEY && captchaWidgetIdRef.current !== null && window.grecaptcha) {
-        window.grecaptcha.reset(captchaWidgetIdRef.current);
-        setCaptchaToken('');
-      }
+      void fetchCaptcha();
     } finally {
       setLoading(false);
     }
@@ -587,6 +593,59 @@ export const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     await performLogin(email, password);
+  };
+
+  const handleVerifyMfa = async (e) => {
+    e.preventDefault();
+    setError('');
+    const code = mfaCode.trim();
+    if (code.length !== 6) {
+      setError('Please enter a valid 6-digit verification code.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/mfa/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          challengeToken: mfaChallenge,
+          code,
+        }),
+      });
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        if (res.status === 503) {
+          throw new Error('Database or server initializing (503). Please retry in 5 seconds.');
+        }
+        if (res.status === 404) {
+          throw new Error('API route not found (404). Please check server routing.');
+        }
+        throw new Error(`Server returned error status ${res.status}. Please try again.`);
+      }
+      if (!data.success) {
+        throw new Error(data.message || 'MFA verification failed');
+      }
+      if (data.data?.mustChangePassword && data.data?.passwordChangeToken) {
+        sessionStorage.setItem('tbi_token', data.data.passwordChangeToken);
+        navigate('/change-password', { replace: true, state: { forced: true } });
+        return;
+      }
+      login(data.data.user, data.data.accessToken);
+      navigate(ROLES[data.data.user.role].route);
+    } catch (err) {
+      const raw = err?.message || '';
+      if (/expired/i.test(raw)) {
+        setError('Verification challenge expired. Please enter your credentials again.');
+        setMfaChallenge(null);
+      } else {
+        setError(raw || 'Invalid verification code. Please check your authenticator and try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const emailHasValue = email.trim().length > 0;
@@ -687,53 +746,91 @@ export const Login = () => {
             </div>
 
             {/* Form */}
-            <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-3.5">
-              {/* Field 1: User ID or Email */}
-              <div>
-                <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
-                  User ID or Email
-                </label>
-                <div className="relative flex items-center bg-white border-[2.5px] border-[#1B5299] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
-                  <span className="pl-3 text-slate-500 shrink-0">
-                    <UserIcon className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-                  </span>
-                  <input
-                    type="text"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="User ID or Email"
-                    required
-
-                    className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
-                  />
-                  <div className="pr-3 shrink-0">
-                    <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${emailHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+            <form onSubmit={mfaChallenge ? handleVerifyMfa : handleSubmit} className="space-y-3 sm:space-y-3.5">
+              {mfaChallenge ? (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide">
+                      Two-Factor Authentication Code
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => { setMfaChallenge(null); setMfaCode(''); setError(''); }}
+                      className="text-xs text-[#1B5299] hover:underline font-['Space_Mono',monospace]"
+                    >
+                      Cancel
+                    </button>
                   </div>
-                </div>
-              </div>
-
-              {/* Field 2: Password */}
-              <div>
-                <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
-                  Password
-                </label>
-                <div className="relative flex items-center bg-white border-[2.5px] border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:border-[#1B5299] focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
-                  <span className="pl-3 text-slate-500 shrink-0">
-                    <Lock className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-                  </span>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Password"
-                    required
-                    className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
-                  />
-                  <div className="pr-3 shrink-0">
-                    <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${passHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+                  <div className="relative flex items-center bg-white border-[2.5px] border-[#1B5299] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all">
+                    <span className="pl-3 text-slate-500 shrink-0">
+                      <Key className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-[#1B5299]" />
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      autoFocus
+                      value={mfaCode}
+                      onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                      placeholder="6-digit code"
+                      required
+                      className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-base tracking-widest text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-3 font-bold text-center"
+                    />
                   </div>
+                  <p className="text-[11px] text-slate-500 mt-1 font-['Space_Mono',monospace]">
+                    Enter the code from your authenticator app
+                  </p>
                 </div>
-              </div>
+              ) : (
+                <>
+                  {/* Field 1: User ID or Email */}
+                  <div>
+                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
+                      User ID or Email
+                    </label>
+                    <div className="relative flex items-center bg-white border-[2.5px] border-[#1B5299] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
+                      <span className="pl-3 text-slate-500 shrink-0">
+                        <UserIcon className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                      </span>
+                      <input
+                        type="text"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="User ID or Email"
+                        required
+                        className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
+                      />
+                      <div className="pr-3 shrink-0">
+                        <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${emailHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Field 2: Password */}
+                  <div>
+                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
+                      Password
+                    </label>
+                    <div className="relative flex items-center bg-white border-[2.5px] border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:border-[#1B5299] focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
+                      <span className="pl-3 text-slate-500 shrink-0">
+                        <Lock className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                      </span>
+                      <input
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Password"
+                        required
+                        className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
+                      />
+                      <div className="pr-3 shrink-0">
+                        <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${passHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Inactivity & Expiry notices */}
               {logoutReason === 'inactivity' && !error && (
@@ -760,6 +857,12 @@ export const Login = () => {
                   <span>Session expired. Please sign in again.</span>
                 </div>
               )}
+              {location.state?.successMessage && !error && (
+                <div className="p-2.5 bg-emerald-50 border-2 border-emerald-500 shadow-[2px_2px_0px_0px_#1A1A1A] rounded-lg text-xs text-emerald-950 font-['Space_Mono',monospace] font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{location.state.successMessage}</span>
+                </div>
+              )}
 
               {/* Error notice */}
               {error && (
@@ -769,10 +872,35 @@ export const Login = () => {
                 </div>
               )}
 
-              {/* reCAPTCHA Widget — only rendered when VITE_RECAPTCHA_SITE_KEY is set */}
-              {SITE_KEY && (
-                <div className="flex justify-center pt-1">
-                  <div ref={captchaContainerRef} />
+              {/* Security CAPTCHA Challenge */}
+              {captchaChallenge && !mfaChallenge && (
+                <div className="pt-0.5">
+                  <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
+                    Security Verification
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="rounded-lg overflow-hidden border-[2px] border-[#1E3A52] shadow-[2px_2px_0px_0px_#1A1A1A] shrink-0"
+                      dangerouslySetInnerHTML={{ __html: captchaChallenge.svg }}
+                    />
+                    <button
+                      type="button"
+                      onClick={fetchCaptcha}
+                      title="New CAPTCHA code"
+                      className="h-[48px] w-10 flex items-center justify-center bg-[#E4DDD0] hover:bg-[#D5CBB8] text-[#1A1A1A] border-2 border-[#1A1A1A] rounded-lg shadow-[2px_2px_0px_0px_#1A1A1A] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition cursor-pointer shrink-0"
+                    >
+                      <RefreshCw className="w-4 h-4 text-slate-700" />
+                    </button>
+                    <input
+                      type="text"
+                      value={captchaAnswer}
+                      onChange={(e) => setCaptchaAnswer(e.target.value.toUpperCase())}
+                      placeholder="Code"
+                      maxLength={5}
+                      required
+                      className="flex-1 min-w-0 h-[48px] bg-white border-[2.5px] border-[#1A1A1A] rounded-lg shadow-[2px_2px_0px_0px_#1A1A1A] font-['Space_Mono',monospace] font-bold text-center text-sm tracking-widest uppercase py-2 px-2 outline-none focus:border-[#1B5299]"
+                    />
+                  </div>
                 </div>
               )}
 
@@ -783,7 +911,7 @@ export const Login = () => {
                   disabled={loading}
                   className="w-full bg-[#C8322B] hover:bg-[#B32720] text-white font-['Barlow_Condensed',sans-serif] font-black text-xl sm:text-2xl uppercase tracking-wider py-2.5 sm:py-3 px-6 border-[2.5px] border-[#1A1A1A] shadow-[4px_4px_0px_0px_#1A1A1A] hover:shadow-[2px_2px_0px_0px_#1A1A1A] hover:translate-x-[2px] hover:translate-y-[2px] active:shadow-none active:translate-x-[4px] active:translate-y-[4px] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-center"
                 >
-                  {loading ? 'Accessing...' : 'Sign In'}
+                  {loading ? 'Processing...' : (mfaChallenge ? 'Verify & Sign In' : 'Sign In')}
                 </button>
               </div>
 
@@ -825,8 +953,9 @@ export const Sidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const socket = useSocket();
-  const cfg = ROLES[user.role];
-  const menus = MENUS[user.role];
+  const role = user?.role || 'T1_VOLUNTEER';
+  const cfg = ROLES[role] || ROLES.T1_VOLUNTEER;
+  const menus = MENUS[role] || MENUS.T1_VOLUNTEER;
 
   // Dynamic notification counts
   const [badges, setBadges] = useState({
@@ -1004,7 +1133,7 @@ export const Sidebar = () => {
                 {cfg.code}
               </div>
               <div className="min-w-0">
-                <p className="text-white text-sm font-medium truncate">{user.name}</p>
+                <p className="text-white text-sm font-medium truncate">{user?.name || 'User'}</p>
                 <span className="text-[10px] text-white/80">{cfg.label}</span>
               </div>
             </div>
@@ -1094,7 +1223,8 @@ export const Topbar = () => {
   const { setMobileOpen } = useLayout();
   const navigate = useNavigate();
   const socket = useSocket();
-  const cfg = ROLES[user.role];
+  const role = user?.role || 'T1_VOLUNTEER';
+  const cfg = ROLES[role] || ROLES.T1_VOLUNTEER;
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
@@ -1177,13 +1307,13 @@ export const Topbar = () => {
         >
           <div
             className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-xs"
-            style={{ backgroundColor: cfg.color }}
+            style={{ backgroundColor: cfg?.color || '#0B5CAD' }}
           >
-            {user.name.charAt(0)}
+            {user?.name ? user.name.charAt(0) : 'U'}
           </div>
           <div className="hidden sm:block text-left">
-            <p className="text-sm font-medium text-gray-800 leading-tight truncate max-w-[120px]">{user.name}</p>
-            <p className="text-[11px] text-gray-500 leading-tight">{cfg.label}</p>
+            <p className="text-sm font-medium text-gray-800 leading-tight truncate max-w-[120px]">{user?.name || 'User'}</p>
+            <p className="text-[11px] text-gray-500 leading-tight">{cfg?.label || 'User'}</p>
           </div>
         </div>
       </div>
@@ -1334,7 +1464,8 @@ export const ProtectedRoute = ({ children, roles }) => {
 
   if (!user || !hasToken) return <Navigate to="/login" replace />;
   if (roles && !roles.includes(user.role)) {
-    return <Navigate to={ROLES[user.role].route} replace />;
+    const targetRoute = ROLES[user?.role]?.route || '/login';
+    return <Navigate to={targetRoute} replace />;
   }
   return <Layout>{children}</Layout>;
 };
@@ -1345,6 +1476,7 @@ export const ProtectedRoute = ({ children, roles }) => {
 // ====================================================================
 export const AdminDashboard = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [tiers, setTiers] = useState(null);
   const [trend, setTrend] = useState([]);
@@ -1397,9 +1529,37 @@ export const AdminDashboard = () => {
   return (
     <div className="space-y-6">
       <AnnouncementBanner />
-      <div>
-        <h1 className="text-2xl font-bold">Good morning, {user.name.split(' ')[0]}</h1>
-        <p className="text-gray-500">Here's what's happening today.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Good morning, {user?.name ? user.name.split(' ')[0] : 'Admin'}</h1>
+          <p className="text-gray-500">Here's what's happening today.</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => navigate('/admin/users/new')}
+            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+          >
+            <UserPlus size={14} /> Add User
+          </button>
+          <button
+            onClick={() => navigate('/admin/users/bulk')}
+            className="px-3.5 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <Upload size={14} /> Bulk Import
+          </button>
+          <button
+            onClick={() => navigate('/t3/workforce')}
+            className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <Calendar size={14} /> Workforce Shifts
+          </button>
+          <button
+            onClick={() => navigate('/t3/approvals')}
+            className="px-3.5 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <CheckCircle size={14} /> Approvals
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -1520,22 +1680,27 @@ export const AdminDashboard = () => {
 
 export const SuperAdminDashboard = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [tiers, setTiers] = useState(null);
   const [trend, setTrend] = useState([]);
+  const [monthLock, setMonthLock] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     void (async () => {
       try {
-        const [statsRes, tiersRes, trendRes] = await Promise.all([
+        const currentMonth = new Date().toISOString().slice(0, 7);
+        const [statsRes, tiersRes, trendRes, lockRes] = await Promise.all([
           api.get('/stats/super-admin'),
           api.get('/stats/users-by-tier'),
           api.get('/stats/applications-trend'),
+          api.get(`/workforce/month-lock/status?month=${currentMonth}`).catch(() => ({ data: { data: null } })),
         ]);
         setStats(statsRes.data.data);
         setTiers(tiersRes.data.data);
         setTrend(trendRes.data.data);
+        setMonthLock(lockRes?.data?.data || null);
       } catch (err) {
         console.error(err);
       } finally {
@@ -1565,9 +1730,63 @@ export const SuperAdminDashboard = () => {
   return (
     <div className="space-y-6">
       <AnnouncementBanner />
-      <div>
-        <h1 className="text-2xl font-bold">Welcome, {user.name}</h1>
-        <p className="text-gray-500">Full system overview and admin actions.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Welcome, {user?.name || 'Super Admin'}</h1>
+          <p className="text-gray-500">Full system governance, security, and workforce overview.</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => navigate('/super-admin/admins')}
+            className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+          >
+            <Shield size={14} /> System Admins
+          </button>
+          <button
+            onClick={() => navigate('/super-admin/sessions')}
+            className="px-3.5 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <Key size={14} /> Active Sessions
+          </button>
+          <button
+            onClick={() => navigate('/super-admin/audit')}
+            className="px-3.5 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <ScrollText size={14} /> Audit Trail
+          </button>
+          <button
+            onClick={() => navigate('/t3/workforce')}
+            className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <Calendar size={14} /> Workforce Engine
+          </button>
+        </div>
+      </div>
+
+      {/* Central Month Lock Sentinel */}
+      <div className="bg-slate-900 text-white rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border border-slate-800 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${monthLock?.isLocked ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+            <Lock className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-sm">Central Month Lock Status</span>
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${monthLock?.isLocked ? 'bg-red-900/60 text-red-300 border border-red-700/50' : 'bg-emerald-900/60 text-emerald-300 border border-emerald-700/50'}`}>
+                {monthLock?.isLocked ? 'LOCKED' : 'OPEN / ACTIVE'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Cycle ({new Date().toISOString().slice(0, 7)}): {monthLock?.isLocked ? `Locked against retroactive changes by ${monthLock.lockedByName || 'Super Admin'}` : 'Attendance and timesheets are editable by leads and team members.'}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => navigate('/t3/workforce')}
+          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shrink-0"
+        >
+          Manage Lock & Shifts →
+        </button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -1667,14 +1886,29 @@ export const T1Dashboard = () => {
     <div className="space-y-6 max-w-2xl">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Hi {user.name.split(' ')[0]}</h1>
+        <h1 className="text-2xl font-bold">Hi {user?.name ? user.name.split(' ')[0] : 'Volunteer'}</h1>
         <p className="text-gray-500">
           {todayStatusMessage}
-
-
-
-
         </p>
+      </div>
+
+      {/* My Workforce & Timesheet Shortcut */}
+      <div className="bg-gradient-to-r from-emerald-600 to-teal-700 rounded-xl p-5 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Calendar className="w-5 h-5 text-emerald-200" />
+            <h3 className="font-bold text-base">Weekly Shifts & Day Timesheet</h3>
+          </div>
+          <p className="text-xs text-emerald-100 max-w-md">
+            Check your scheduled shifts, assigned team tasks, and log your daily work hours with overtime reporting.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/my-workforce')}
+          className="px-4 py-2 bg-white text-emerald-800 font-semibold text-xs rounded-lg shadow-sm hover:bg-emerald-50 transition shrink-0 cursor-pointer"
+        >
+          Open Schedule & Timesheet →
+        </button>
       </div>
 
       {/* Today's status card */}
@@ -1750,15 +1984,15 @@ export const T1Dashboard = () => {
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
-        <Kpi label="Applications" value={stats.myApplications} />
-        <Kpi label="Approved" value={stats.approved} />
-        <Kpi label="Certificates" value={stats.certificates} />
+        <Kpi label="Applications" value={safeStats.myApplications ?? 0} />
+        <Kpi label="Approved" value={safeStats.approved ?? 0} />
+        <Kpi label="Certificates" value={safeStats.certificates ?? 0} />
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        <Kpi label="Pending" value={stats.pending} />
-        <Kpi label="Days Attended" value={stats.attendanceDays} />
-        <Kpi label="My Teams" value={stats.myTeams} />
+        <Kpi label="Pending" value={safeStats.pending ?? 0} />
+        <Kpi label="Days Attended" value={safeStats.attendanceDays ?? 0} />
+        <Kpi label="My Teams" value={safeStats.myTeams ?? 0} />
       </div>
     </div>
   );
@@ -1845,7 +2079,11 @@ export const UserManagement = () => {
       setUsers([res.data.data, ...users]);
       setModal(false);
       setForm({ name: '', email: '', phone: '', role: 'T1_VOLUNTEER' });
-      alert(`User created!\n\nAn email with login credentials has been sent to ${res.data.data.email}.`);
+      if (res.data?.emailSent === false) {
+        alert(`User created, but welcome email could not be sent (SMTP not configured or failed).\n\nPlease check server email settings.`);
+      } else {
+        alert(`User created!\n\nAn email with login credentials has been sent to ${res.data.data.email}.`);
+      }
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to create user');
     } finally {
@@ -2247,8 +2485,15 @@ export const UserManagement = () => {
                   <option value="T1_VOLUNTEER">T1 Volunteer</option>
                   <option value="T2_ASSOCIATE">T2 Associate</option>
                   <option value="T3_EXECUTIVE">T3 Executive</option>
+                  {canManageAccess && <option value="ADMIN">Admin</option>}
                 </select>
               </div>
+              {form.role === 'ADMIN' && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-start gap-2">
+                  <Shield size={14} className="mt-0.5 flex-shrink-0" />
+                  <span>Admin accounts receive standard default administrative permissions upon creation. Custom permission overrides can be configured immediately after creation using &ldquo;Manage Permissions&rdquo;.</span>
+                </div>
+              )}
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 flex items-start gap-2">
                 <Info size={14} className="mt-0.5 flex-shrink-0" />
                 <span>Login credentials will be emailed to the user automatically.</span>
@@ -6795,6 +7040,7 @@ export const BulkImportPage = () => {
     setProgress(0);
 
     let succeeded = 0;
+    let emailFailedCount = 0;
     const importErrors = [];
     const BATCH_SIZE = 25; // Sized to fit comfortably within Vercel serverless function limits
 
@@ -6815,6 +7061,9 @@ export const BulkImportPage = () => {
           const origRow = chunk[idx];
           if (resRow.status === 'created') {
             succeeded++;
+            if (resRow.emailSent === false) {
+              emailFailedCount++;
+            }
           } else {
             importErrors.push({ line: origRow._line, error: resRow.error || 'Failed' });
           }
@@ -6833,7 +7082,7 @@ export const BulkImportPage = () => {
     if (importErrors.length > 0) {
       console.warn('Import errors:', importErrors);
     }
-    setImportResult({ succeeded, failed: importErrors.length, errors: importErrors });
+    setImportResult({ succeeded, failed: importErrors.length, emailFailedCount, errors: importErrors });
   };
 
   const reset = () => {
@@ -6971,6 +7220,7 @@ export const BulkImportPage = () => {
             {importResult ? importResult.succeeded : validRows.length} users created successfully
             {importResult && importResult.failed > 0 ? `, ${importResult.failed} failed` : ''}
             {invalidRows.length > 0 ? `, ${invalidRows.length} invalid rows skipped` : ''}
+            {importResult && importResult.emailFailedCount > 0 ? ` (${importResult.emailFailedCount} created without email delivery)` : ''}
           </p>
           <div className="flex gap-3 justify-center">
             <button className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Download Report</button>
@@ -7317,42 +7567,69 @@ export const TeamsPage = () => {
 // MY SHIFTS
 // ====================================================================
 export const MyShiftsPage = () => {
-  const shifts = [
-    { _id: '1', event: 'Annual Tech Fest 2026', role: 'Tech Team', date: 'Oct 15, 2026', time: '9:00 AM - 1:00 PM', status: 'upcoming' },
-    { _id: '2', event: 'Startup Pitch Day', role: 'Registration', date: 'Nov 5, 2026', time: '10:00 AM - 4:00 PM', status: 'upcoming' },
-    { _id: '3', event: 'Design Sprint', role: 'Media Team', date: 'Sep 20, 2026', time: '2:00 PM - 6:00 PM', status: 'completed' },
-  ];
-  const statusColor = {
-    upcoming: 'bg-blue-100 text-blue-700',
-    completed: 'bg-green-100 text-green-700',
-    missed: 'bg-red-100 text-red-700',
-  };
+  const [teams, setTeams] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchAssignments = async () => {
+      try {
+        const res = await api.get('/teams/me');
+        if (mounted) {
+          const list = Array.isArray(res.data?.data) ? res.data.data : (Array.isArray(res.data) ? res.data : []);
+          setTeams(list);
+        }
+      } catch (err) {
+        console.error('Failed to load assigned teams/shifts:', err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    void fetchAssignments();
+    return () => { mounted = false; };
+  }, []);
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">My Shifts</h1>
-        <p className="text-gray-500">All your assigned shifts across events</p>
+        <h1 className="text-2xl font-bold">My Shifts & Teams</h1>
+        <p className="text-gray-500">Your assigned team and event shift allocations</p>
       </div>
-      <div className="space-y-3">
-        {shifts.map((s) => (
-          <div key={s._id} className="bg-white rounded-xl border border-gray-200 p-5 flex items-center justify-between hover:shadow-md transition">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-lg bg-blue-50 flex items-center justify-center">
-                <Calendar className="w-6 h-6 text-blue-500" />
+
+      {loading ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-500 text-sm">
+          Loading assigned shifts...
+        </div>
+      ) : teams.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
+          <Calendar className="w-10 h-10 text-gray-400 mx-auto mb-3" />
+          <p className="font-semibold text-gray-800">No active shifts assigned yet</p>
+          <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
+            Once a team lead or event head accepts your application or assigns you to an event roster, it will appear here.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {teams.map((t) => (
+            <div key={t._id} className="bg-white rounded-xl border border-gray-200 p-5 flex items-center justify-between hover:shadow-md transition">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                  <Calendar className="w-6 h-6 text-blue-500" />
+                </div>
+                <div>
+                  <p className="font-semibold text-gray-900">{t.eventTitle || t.name}</p>
+                  <p className="text-sm text-gray-500">Team: <span className="font-medium text-gray-700">{t.name}</span></p>
+                  <p className="text-xs text-gray-400 mt-1 flex items-center gap-3">
+                    <span className="flex items-center gap-1"><UsersRound size={12} /> {t.memberCount || t.members?.length || 1} members</span>
+                    {t.leadName && <span className="flex items-center gap-1 font-medium text-gray-600">Lead: {t.leadName}</span>}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="font-semibold">{s.event}</p>
-                <p className="text-sm text-gray-500">{s.role}</p>
-                <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-3">
-                  <span className="flex items-center gap-1"><Calendar size={12} /> {s.date}</span>
-                  <span className="flex items-center gap-1"><Timer size={12} /> {s.time}</span>
-                </p>
-              </div>
+              <span className="text-xs px-3 py-1 rounded-full font-medium bg-emerald-100 text-emerald-700">Active</span>
             </div>
-            <span className={`text-xs px-3 py-1 rounded-full font-medium ${statusColor[s.status]}`}>{s.status}</span>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -8036,8 +8313,37 @@ export const T3DashboardEnhanced = () => {
     <div className="space-y-6">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Hi {user.name.split(' ')[0]}</h1>
+        <h1 className="text-2xl font-bold">Hi {user?.name ? user.name.split(' ')[0] : 'Executive'}</h1>
         <p className="text-gray-500">Your events and pending tasks</p>
+      </div>
+
+      {/* Workforce Management Hub for T3 Lead */}
+      <div className="bg-gradient-to-r from-purple-900 to-indigo-900 text-white rounded-xl p-5 border border-purple-800 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Calendar className="w-5 h-5 text-purple-300" />
+              <h3 className="font-bold text-base">T3 Workforce Management Hub</h3>
+            </div>
+            <p className="text-xs text-purple-200 max-w-lg">
+              Manage your 7-day team shift matrix, assign inline tasks, review submitted timesheets, and approve attendance regularizations.
+            </p>
+          </div>
+          <div className="flex gap-2 flex-wrap shrink-0">
+            <button
+              onClick={() => navigate('/t3/workforce')}
+              className="px-3.5 py-2 bg-purple-500 hover:bg-purple-600 text-white font-semibold text-xs rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Calendar size={14} /> Shift Calendar & Register
+            </button>
+            <button
+              onClick={() => navigate('/t3/approvals')}
+              className="px-3.5 py-2 bg-white text-purple-900 hover:bg-purple-50 font-semibold text-xs rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <CheckCircle size={14} /> Approvals Inbox
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -8185,8 +8491,27 @@ export const T2DashboardEnhanced = () => {
     <div className="space-y-6">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Hey {user.name.split(' ')[0]}</h1>
+        <h1 className="text-2xl font-bold">Hey {user?.name ? user.name.split(' ')[0] : 'Associate'}</h1>
         <p className="text-gray-500">Here's your activity</p>
+      </div>
+
+      {/* My Workforce & Timesheet Shortcut */}
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl p-5 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Calendar className="w-5 h-5 text-blue-200" />
+            <h3 className="font-bold text-base">Weekly Shifts & Day Timesheet</h3>
+          </div>
+          <p className="text-xs text-blue-100 max-w-md">
+            View your scheduled shifts, assigned team tasks, and log your daily work hours with overtime reporting.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/my-workforce')}
+          className="px-4 py-2 bg-white text-blue-800 font-semibold text-xs rounded-lg shadow-sm hover:bg-blue-50 transition shrink-0 cursor-pointer"
+        >
+          Open Schedule & Timesheet →
+        </button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -8833,7 +9158,8 @@ export const ProfilePage = () => {
     }
   };
 
-  const cfg = ROLES[user.role];
+  const role = user?.role || 'T1_VOLUNTEER';
+  const cfg = ROLES[role] || ROLES.T1_VOLUNTEER;
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
@@ -8841,7 +9167,7 @@ export const ProfilePage = () => {
         <p className="text-gray-500">Manage your account information and security</p>
       </div>
 
-      {user.role === 'ADMIN' && (
+      {user?.role === 'ADMIN' && (
         <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-3 text-amber-800 text-sm">
           <Info className="w-5 h-5 text-amber-600 shrink-0" />
           <div>
@@ -8852,12 +9178,12 @@ export const ProfilePage = () => {
 
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-center gap-5">
-          <div className="w-20 h-20 rounded-full flex items-center justify-center text-white text-2xl font-bold" style={{ backgroundColor: cfg.color }}>
-            {user.name.charAt(0)}
+          <div className="w-20 h-20 rounded-full flex items-center justify-center text-white text-2xl font-bold" style={{ backgroundColor: cfg?.color || '#0B5CAD' }}>
+            {user?.name ? user.name.charAt(0) : 'U'}
           </div>
           <div className="flex-1">
-            <h2 className="text-xl font-bold">{user.name}</h2>
-            <p className="text-sm text-gray-500">{user.email}</p>
+            <h2 className="text-xl font-bold">{user?.name || 'User'}</h2>
+            <p className="text-sm text-gray-500">{user?.email || ''}</p>
             {user.userId && (
               <p className="text-xs font-mono font-bold text-gray-700 mt-1">User ID: {user.userId}</p>
             )}
@@ -9333,6 +9659,8 @@ export const LandingPage = () => {
 export const ChangePasswordPage = () => {
   const { logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isForced = location.state?.forced || Boolean(sessionStorage.getItem('tbi_token') && !sessionStorage.getItem('tbi_user'));
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -9355,10 +9683,13 @@ export const ChangePasswordPage = () => {
     if (!allValid) return setError('Please complete all requirements');
     setLoading(true);
     try {
-      await api.post('/auth/change-password', { oldPassword, newPassword });
-      alert('Password changed successfully. Please login again.');
-      logout();
-      navigate('/login', { replace: true });
+      await api.post('/auth/change-password', {
+        ...(isForced ? {} : { oldPassword }),
+        newPassword,
+      });
+      sessionStorage.removeItem('tbi_token');
+      if (logout) logout();
+      navigate('/login', { replace: true, state: { successMessage: 'Password changed successfully. Please log in.' } });
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to change password');
     } finally {
@@ -9381,12 +9712,14 @@ export const ChangePasswordPage = () => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium mb-2">Current Password</label>
-              <input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)}
-                placeholder="Your temp password"
-                className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required />
-            </div>
+            {!isForced && (
+              <div>
+                <label className="block text-sm font-medium mb-2">Current Password</label>
+                <input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)}
+                  placeholder="Your current password"
+                  className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required={!isForced} />
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium mb-2">New Password</label>
               <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
@@ -9423,7 +9756,7 @@ export const ChangePasswordPage = () => {
               {loading ? 'Updating...' : 'Change Password & Continue'}
             </button>
 
-            <button type="button" onClick={() => { logout(); navigate('/login'); }}
+            <button type="button" onClick={() => { sessionStorage.removeItem('tbi_token'); if (logout) logout(); navigate('/login'); }}
               className="w-full text-center text-sm text-gray-500 hover:text-gray-700">
               Cancel and logout
             </button>
@@ -9658,8 +9991,8 @@ export const ToggleSwitch = ({ checked, onChange }) => (
 // ====================================================================
 export const AddUserPage = () => {
   const navigate = useNavigate();
-
-
+  const { user: currentUser } = useAuth();
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
 
   const [form, setForm] = useState({
     name: '',
@@ -9692,6 +10025,7 @@ export const AddUserPage = () => {
     { value: 'T1_VOLUNTEER', label: 'T1 Volunteer', desc: 'Event helper, applies to shifts', icon: 'T1', color: 'bg-green-100 text-green-700 border-green-300' },
     { value: 'T2_ASSOCIATE', label: 'T2 Associate', desc: 'Team coordinator, assists T1s', icon: 'T2', color: 'bg-blue-100 text-blue-700 border-blue-300' },
     { value: 'T3_EXECUTIVE', label: 'T3 Executive', desc: 'Senior lead, manages teams', icon: 'T3', color: 'bg-purple-100 text-purple-700 border-purple-300' },
+    ...(isSuperAdmin ? [{ value: 'ADMIN', label: 'Admin', desc: 'System administrator with custom grants', icon: 'AD', color: 'bg-orange-100 text-orange-700 border-orange-300' }] : []),
   ];
 
   if (created) {
@@ -10169,7 +10503,7 @@ export const AnnouncementPopup = () => {
   useEffect(() => {
     if (!user) return;
 
-    const checkKey = `announcements_shown_${user._id}_${new Date().toDateString()}`;
+    const checkKey = `announcements_shown_${user?._id || user?.id || 'guest'}_${new Date().toDateString()}`;
     const alreadyShown = sessionStorage.getItem(checkKey);
     if (alreadyShown) return;
 

@@ -7,7 +7,9 @@ import('@tbi/shared-constants/roles')
   .then((m) => {
     if (m?.PRIVILEGED_ROLES) PRIVILEGED_ROLES = m.PRIVILEGED_ROLES;
   })
-  .catch(() => {});
+  .catch((err) => {
+    console.error('[CHAT] Failed to load canonical PRIVILEGED_ROLES from shared-constants:', err.message);
+  });
 const { AuthorizationError, ValidationError } = require('../../core/errors/typedErrors');
 const { notify } = require('../notifications/notifications.service');
 
