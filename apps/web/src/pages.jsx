@@ -1754,7 +1754,7 @@ export const T1Dashboard = () => {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await api.get('/stats/t3');
+        const res = await api.get('/stats/t1');
         setStats(res.data.data);
       } catch (err) {
         console.error(err);
@@ -1798,13 +1798,9 @@ export const T1Dashboard = () => {
     <div className="space-y-6 max-w-2xl">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Hi {user?.name ? user.name.split(' ')[0] : 'Executive'}</h1>
+        <h1 className="text-2xl font-bold">Hi {user?.name ? user.name.split(' ')[0] : 'Volunteer'}</h1>
         <p className="text-gray-500">
           {todayStatusMessage}
-
-
-
-
         </p>
       </div>
 
@@ -8159,7 +8155,7 @@ export const T3DashboardEnhanced = () => {
       try {
         const [eventsRes, statsRes] = await Promise.all([
           api.get('/events/me'),
-          api.get('/stats/t2'),
+          api.get('/stats/t3'),
         ]);
         setMyEvents(eventsRes.data.data);
         setStats(statsRes.data.data);
@@ -8321,7 +8317,7 @@ export const T2DashboardEnhanced = () => {
   useEffect(() => {
     (async () => {
       try {
-        const res = await api.get('/stats/t1');
+        const res = await api.get('/stats/t2');
         setStats(res.data.data);
       } catch (err) {
         console.error(err);
