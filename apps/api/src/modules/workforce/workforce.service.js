@@ -258,89 +258,315 @@ class WorkforceService {
   // 4. MANUAL ATTENDANCE MARKING (T3 REGISTER)
   // ====================================================================
   async markManualAttendance(data, marker) {
-    const { userId, teamId, date, status, reason } = data;
-    if (!userId || !teamId || !date || !status) {
-      throw new ValidationError('userId, teamId, date, and status are required');
+    const { userId, date, status } = data;
+    const note = (data.note || data.reason || '').trim();
+
+    if (!userId || !date || !status) {
+      throw new ValidationError('userId, date, and status are required');
     }
 
     // No self-marking rule
     if (marker.sub.toString() === userId.toString()) {
-      throw new AuthorizationError('Cannot mark own attendance. Self-attendance must be marked via QR check-in or approved by an administrator');
+      throw new AuthorizationError('Cannot mark own attendance');
     }
 
-    const team = await Team.findById(teamId).select('name leadId members');
-    if (!team) throw new ValidationError('Team not found');
+    const todayIST = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().split('T')[0];
+    if (date > todayIST) {
+      throw new ValidationError('Cannot mark attendance for future dates');
+    }
 
-    const isMember = team.members.some((m) => m.toString() === userId.toString()) ||
-      (team.leadId && team.leadId.toString() === userId.toString());
-    if (!isMember) throw new ValidationError('Target user is not a member of this team');
+    const diffDays = Math.floor((new Date(todayIST + 'T00:00:00Z').getTime() - new Date(date + 'T00:00:00Z').getTime()) / (1000 * 3600 * 24));
+    const isPrivileged = ['ADMIN', 'SUPER_ADMIN'].includes(marker.role);
+    if (diffDays > 7) {
+      if (!isPrivileged) {
+        throw new ValidationError('Attendance cannot be marked for dates older than 7 days');
+      }
+      if (note.length < 10) {
+        throw new ValidationError('Administrators must provide a reason of at least 10 characters when marking attendance older than 7 days');
+      }
+    }
 
-    const userDoc = await User.findById(userId).select('name email role');
-    if (!userDoc) throw new ValidationError('User not found');
+    if (note.length > 500) {
+      throw new ValidationError('Note must not exceed 500 characters');
+    }
 
-    const assignment = await ShiftAssignment.findOne({ userId, date }).lean();
+    const normalizedStatus = String(status).toUpperCase();
+    const validStatuses = ['PRESENT', 'LATE', 'HALF_DAY', 'ABSENT', 'ON_LEAVE'];
+    if (!validStatuses.includes(normalizedStatus)) {
+      throw new ValidationError(`Invalid status: ${status}. Must be one of ${validStatuses.join(', ')}`);
+    }
+
+    const targetUser = await User.findById(userId).select('name email role teamId');
+    if (!targetUser) throw new ValidationError('Target user not found');
+
+    let effectiveTeamId;
+
+    if (marker.role === 'T3_EXECUTIVE') {
+      // The caller must be the T3 who leads that person's team; team comes from database, never request
+      const team = await Team.findOne({
+        leadId: marker.sub,
+        members: targetUser._id,
+      });
+
+      if (!team) {
+        throw new AuthorizationError('You are not the designated lead for this member\'s team');
+      }
+      effectiveTeamId = team._id;
+    } else {
+      let team = null;
+      if (targetUser.teamId) {
+        team = await Team.findById(targetUser.teamId);
+      }
+      if (!team && data.teamId) {
+        team = await Team.findById(data.teamId);
+      }
+      if (!team) {
+        team = await Team.findOne({ members: targetUser._id });
+      }
+      if (!team) {
+        throw new ValidationError('Team not found for target member');
+      }
+      effectiveTeamId = team._id;
+    }
 
     const existing = await DailyAttendance.findOne({ userId, date });
-    const originalStatus = existing ? (existing.originalStatus || existing.status) : status;
+    const isQrOverride = Boolean(existing && existing.rawPunchId);
 
-    // Audit log if overriding a QR-scanned punch
-    if (existing && existing.rawPunchId) {
-      await AuditLog.create({
-        action: 'ATTENDANCE_OVERWRITE_MANUAL',
-        performedBy: marker.sub,
-        performedByName: marker.name || marker.email || 'Lead',
-        targetId: userId,
-        targetType: 'User',
-        details: {
-          previousStatus: existing.status,
-          newStatus: status,
-          date,
-          teamId,
-          reason: reason || 'Manual override by team lead',
-        },
-        timestamp: new Date(),
-      }).catch((e) => console.error('AuditLog error:', e.message));
+    // Note required for absent, late and for overriding a QR-scanned day
+    if (['ABSENT', 'LATE'].includes(normalizedStatus) || isQrOverride) {
+      if (!note) {
+        throw new ValidationError('A note is required when marking absent, late, or overriding a QR-scanned check-in');
+      }
     }
+
+    const assignment = await ShiftAssignment.findOne({ userId, date }).lean();
+    const previousStatus = existing ? existing.status : null;
+    const originalStatus = existing ? (existing.originalStatus || existing.status) : normalizedStatus;
 
     const updateFields = {
       userId,
-      userName: userDoc.name,
-      userEmail: userDoc.email,
-      userRole: userDoc.role,
-      teamId,
+      userName: targetUser.name,
+      userEmail: targetUser.email,
+      userRole: targetUser.role,
+      teamId: effectiveTeamId,
       date,
       shiftAssignmentId: assignment?._id || null,
       shiftStart: assignment?.startTime || '09:00',
       shiftEnd: assignment?.endTime || '17:00',
-      status,
+      status: normalizedStatus,
       originalStatus,
-      markedMethod: marker.role === 'SUPER_ADMIN' || marker.role === 'ADMIN' ? 'manual_admin' : 'manual_lead',
+      markedMethod: isPrivileged ? 'manual_admin' : 'manual_lead',
       manualEntry: {
         markedBy: marker.sub,
         markedByName: marker.name || '',
         markedAt: new Date(),
-        reason: (reason || '').trim(),
+        reason: note,
       },
     };
 
-    return await DailyAttendance.findOneAndUpdate(
+    const record = await DailyAttendance.findOneAndUpdate(
       { userId, date },
       { $set: updateFields },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );
+
+    // Write audit log entry on every change
+    await AuditLog.create({
+      action: isQrOverride ? 'ATTENDANCE_OVERWRITE_MANUAL' : 'ATTENDANCE_MANUAL_MARK',
+      performedBy: marker.sub,
+      performedByName: marker.name || marker.email || 'Lead',
+      targetId: userId,
+      targetType: 'User',
+      details: {
+        date,
+        previousStatus,
+        newStatus: normalizedStatus,
+        teamId: effectiveTeamId,
+        note,
+        isQrOverride,
+      },
+      timestamp: new Date(),
+    }).catch((e) => console.error('AuditLog error:', e.message));
+
+    return record;
   }
 
-  async getAttendanceRegister(teamId, month) {
-    if (!teamId || !month) throw new ValidationError('teamId and month (YYYY-MM) are required');
-    const start = `${month}-01`;
-    const end = `${month}-31`;
+  // Bulk: mark all present for one date and one team
+  async markAllPresent(data, marker) {
+    const { date } = data;
+    if (!date) throw new ValidationError('date is required');
 
-    const records = await DailyAttendance.find({
-      teamId,
-      date: { $gte: start, $lte: end },
-    }).sort({ date: 1, userName: 1 }).lean();
+    const todayIST = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().split('T')[0];
+    if (date > todayIST) {
+      throw new ValidationError('Cannot mark attendance for future dates');
+    }
 
-    return records;
+    const isPrivileged = ['ADMIN', 'SUPER_ADMIN'].includes(marker.role);
+    const diffDays = Math.floor((new Date(todayIST + 'T00:00:00Z').getTime() - new Date(date + 'T00:00:00Z').getTime()) / (1000 * 3600 * 24));
+    if (diffDays > 7 && !isPrivileged) {
+      throw new ValidationError('Attendance cannot be marked for dates older than 7 days');
+    }
+
+    let team;
+    if (marker.role === 'T3_EXECUTIVE') {
+      team = await Team.findOne({ leadId: marker.sub });
+      if (!team) throw new AuthorizationError('You are not designated as lead for any team');
+    } else {
+      if (!data.teamId) throw new ValidationError('teamId is required for administrators');
+      team = await Team.findById(data.teamId);
+      if (!team) throw new ValidationError('Team not found');
+    }
+
+    // Lead never marks themselves
+    const memberIds = (team.members || []).filter((m) => m.toString() !== marker.sub.toString());
+    if (memberIds.length === 0) {
+      return { markedCount: 0, skippedCount: 0, totalMembers: 0 };
+    }
+
+    const existingRecords = await DailyAttendance.find({
+      userId: { $in: memberIds },
+      date,
+    });
+
+    const alreadyMarkedSet = new Set((existingRecords || []).map((r) => r.userId.toString()));
+    const members = await User.find({ _id: { $in: memberIds }, isActive: true });
+
+    let markedCount = 0;
+    let skippedCount = 0;
+
+    for (const member of members) {
+      const mId = member._id.toString();
+      if (alreadyMarkedSet.has(mId)) {
+        skippedCount++;
+        continue;
+      }
+
+      await DailyAttendance.create({
+        userId: member._id,
+        userName: member.name,
+        userEmail: member.email,
+        userRole: member.role,
+        teamId: team._id,
+        date,
+        status: 'PRESENT',
+        originalStatus: 'PRESENT',
+        markedMethod: isPrivileged ? 'manual_admin' : 'manual_lead',
+        manualEntry: {
+          markedBy: marker.sub,
+          markedByName: marker.name || '',
+          markedAt: new Date(),
+          reason: 'Bulk marked present by team lead',
+        },
+      });
+      markedCount++;
+    }
+
+    // Single audit entry
+    await AuditLog.create({
+      action: 'ATTENDANCE_BULK_MARK_PRESENT',
+      performedBy: marker.sub,
+      performedByName: marker.name || marker.email || 'Lead',
+      targetId: team._id,
+      targetType: 'Team',
+      details: { teamId: team._id, date, markedCount, skippedCount },
+      timestamp: new Date(),
+    }).catch((e) => console.error('AuditLog error:', e.message));
+
+    return { markedCount, skippedCount, totalMembers: memberIds.length };
+  }
+
+  async getAttendanceRegister(query, requester) {
+    const { teamId, startDate, endDate, month } = query;
+    let start = startDate;
+    let end = endDate;
+
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      start = `${month}-01`;
+      end = `${month}-31`;
+    }
+    if (!start || !end) {
+      const today = new Date().toISOString().split('T')[0];
+      start = today.slice(0, 7) + '-01';
+      end = today.slice(0, 7) + '-31';
+    }
+
+    const isPrivileged = ['ADMIN', 'SUPER_ADMIN'].includes(requester.role);
+    let targetTeam;
+
+    if (requester.role === 'T3_EXECUTIVE') {
+      targetTeam = await Team.findOne({ leadId: requester.sub });
+      if (!targetTeam) throw new AuthorizationError('You are not designated as lead for any team');
+    } else if (isPrivileged) {
+      if (!teamId) throw new ValidationError('teamId is required for administrators');
+      targetTeam = await Team.findById(teamId);
+      if (!targetTeam) throw new ValidationError('Team not found');
+    } else {
+      // T1 / T2
+      const targetUser = await User.findById(requester.sub).select('teamId');
+      targetTeam = targetUser?.teamId ? await Team.findById(targetUser.teamId) : await Team.findOne({ members: requester.sub });
+      if (!targetTeam) throw new ValidationError('You are not assigned to a team');
+    }
+
+    let memberIds = [];
+    if (!isPrivileged && requester.role !== 'T3_EXECUTIVE') {
+      memberIds = [requester.sub];
+    } else {
+      memberIds = targetTeam.members ? [...targetTeam.members] : [];
+      if (targetTeam.leadId && !memberIds.some((m) => m.toString() === targetTeam.leadId.toString())) {
+        memberIds.unshift(targetTeam.leadId);
+      }
+    }
+
+    const [membersDocs, attendanceDocs, assignmentDocs] = await Promise.all([
+      User.find({ _id: { $in: memberIds } }).select('name email role userId').lean(),
+      DailyAttendance.find({ userId: { $in: memberIds }, date: { $gte: start, $lte: end } }).lean(),
+      ShiftAssignment.find({ userId: { $in: memberIds }, date: { $gte: start, $lte: end } }).lean(),
+    ]);
+
+    const rows = membersDocs.map((member) => {
+      const mId = member._id.toString();
+      const isLead = targetTeam.leadId && targetTeam.leadId.toString() === mId;
+
+      return {
+        userId: mId,
+        userIdentifier: member.userId || null,
+        name: member.name,
+        email: member.email,
+        role: member.role,
+        isLead: Boolean(isLead),
+        teamId: targetTeam._id,
+        teamName: targetTeam.name,
+      };
+    });
+
+    return {
+      team: { _id: targetTeam._id, name: targetTeam.name, leadId: targetTeam.leadId },
+      dateRange: { startDate: start, endDate: end },
+      members: rows,
+      attendance: attendanceDocs.map((a) => ({
+        _id: a._id,
+        userId: a.userId.toString(),
+        date: a.date,
+        status: a.status,
+        originalStatus: a.originalStatus,
+        source: a.markedMethod === 'qr_scan' ? 'qr' : (a.markedMethod?.startsWith('manual') ? 'manual' : 'auto'),
+        markedMethod: a.markedMethod,
+        isUnassigned: Boolean(a.isUnassigned),
+        note: a.manualEntry?.reason || '',
+        pendingCorrection: Boolean(a.regularization?.status === 'PENDING'),
+        targetStatus: a.regularization?.targetStatus || null,
+      })),
+      assignments: assignmentDocs.map((s) => ({
+        _id: s._id,
+        userId: s.userId.toString(),
+        date: s.date,
+        shiftName: s.shiftName,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        durationHours: s.durationHours,
+        taskCount: s.taskIds?.length || 0,
+      })),
+    };
   }
 
   // --- Attendance Regularization (Phase 5) ---
@@ -666,29 +892,38 @@ class WorkforceService {
   // ====================================================================
   // 7. FORMULA-SAFE CSV EXPORT
   // ====================================================================
-  async exportMonthlyRegisterCSV(teamId, month) {
-    const records = await this.getAttendanceRegister(teamId, month);
-    const headers = ['Date', 'User Name', 'Email', 'Role', 'Status', 'Method', 'Shift Start', 'Shift End', 'Marked By', 'Reason'];
+  async exportMonthlyRegisterCSV(query, requester) {
+    const q = typeof query === 'string' ? { teamId: query } : (query || {});
+    const regData = await this.getAttendanceRegister(q, requester || { role: 'SUPER_ADMIN', sub: 'system' });
+    const headers = ['Date', 'User Name', 'Email', 'Role', 'Status', 'Method', 'Shift', 'Task Count', 'Correction Pending', 'Reason'];
 
     const rows = [headers.map(sanitizeCsvCell).join(',')];
-    for (const r of records) {
+    const teamName = regData.team?.name || 'team';
+    const month = (q.month || q.startDate?.slice(0, 7) || 'month');
+
+    const memberMap = new Map((regData.members || []).map((m) => [m.userId, m]));
+    const assignMap = new Map((regData.assignments || []).map((s) => [`${s.userId}_${s.date}`, s]));
+
+    for (const a of (regData.attendance || [])) {
+      const member = memberMap.get(a.userId.toString());
+      const s = assignMap.get(`${a.userId.toString()}_${a.date}`);
       rows.push([
-        r.date,
-        r.userName,
-        r.userEmail,
-        r.userRole,
-        r.status,
-        r.markedMethod,
-        r.shiftStart,
-        r.shiftEnd,
-        r.manualEntry?.markedByName || '',
-        r.manualEntry?.reason || '',
+        a.date,
+        member?.name || a.userName || 'Unknown',
+        member?.email || a.userEmail || '',
+        member?.role || a.userRole || '',
+        a.status,
+        a.source || a.markedMethod,
+        s ? `${s.shiftName} (${s.startTime}-${s.endTime})` : '',
+        s ? s.taskCount : 0,
+        a.pendingCorrection ? 'YES' : 'NO',
+        a.note || '',
       ].map(sanitizeCsvCell).join(','));
     }
 
     return {
       csv: rows.join('\r\n'),
-      filename: `attendance-register-${teamId}-${month}.csv`,
+      filename: `attendance-register-${teamName.replace(/\s+/g, '_')}-${month}.csv`,
     };
   }
 }

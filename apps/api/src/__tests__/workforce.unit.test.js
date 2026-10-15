@@ -205,8 +205,7 @@ describe('Workforce Module Unit Tests', () => {
       async () => {
         await workforceService.markManualAttendance({
           userId: leadId,
-          teamId,
-          date: '2026-10-20',
+          date: '2026-10-14',
           status: 'PRESENT',
         }, { sub: leadId.toString(), role: 'T3_EXECUTIVE' });
       },
@@ -214,50 +213,170 @@ describe('Workforce Module Unit Tests', () => {
     );
   });
 
-  test('Manual Attendance: successfully marks attendance for team member and records audit when overriding', async (t) => {
-    t.mock.method(Team, 'findById', () => ({
-      select: async () => ({
-        _id: teamId,
-        name: 'Alpha Team',
-        leadId,
-        members: [memberId],
-      }),
+  test('Manual Attendance: rejects future date', async () => {
+    await assert.rejects(
+      async () => {
+        await workforceService.markManualAttendance({
+          userId: memberId,
+          date: '2099-01-01',
+          status: 'PRESENT',
+        }, { sub: leadId.toString(), role: 'T3_EXECUTIVE' });
+      },
+      /Cannot mark attendance for future dates/
+    );
+  });
+
+  test('Manual Attendance: rejects date beyond 7 days for T3, but allows for ADMIN with reason', async () => {
+    const oldDate = '2026-09-01';
+
+    await assert.rejects(
+      async () => {
+        await workforceService.markManualAttendance({
+          userId: memberId,
+          date: oldDate,
+          status: 'PRESENT',
+        }, { sub: leadId.toString(), role: 'T3_EXECUTIVE' });
+      },
+      /older than 7 days/
+    );
+
+    // Admin without reason is rejected
+    await assert.rejects(
+      async () => {
+        await workforceService.markManualAttendance({
+          userId: memberId,
+          date: oldDate,
+          status: 'PRESENT',
+          note: 'short',
+        }, { sub: id('9').toString(), role: 'ADMIN' });
+      },
+      /Administrators must provide a reason/
+    );
+  });
+
+  test('Manual Attendance: rejects override of a QR-scanned day without a note', async (t) => {
+    t.mock.method(User, 'findById', () => ({
+      select: async () => ({ _id: memberId, name: 'T1 Member', email: 't1@test.com', role: 'T1_VOLUNTEER' }),
+    }));
+    t.mock.method(Team, 'findOne', () => ({
+      _id: teamId,
+      name: 'Alpha Team',
+      leadId,
+      members: [memberId],
+    }));
+    t.mock.method(DailyAttendance, 'findOne', async () => ({
+      status: 'PRESENT',
+      rawPunchId: id('a'),
     }));
 
+    await assert.rejects(
+      async () => {
+        await workforceService.markManualAttendance({
+          userId: memberId,
+          date: '2026-10-14',
+          status: 'PRESENT',
+          note: '',
+        }, { sub: leadId.toString(), role: 'T3_EXECUTIVE' });
+      },
+      /A note is required/
+    );
+  });
+
+  test('Manual Attendance: T3 marks own team member OK, ignores team in request body, and writes audit', async (t) => {
     t.mock.method(User, 'findById', () => ({
       select: async () => ({ _id: memberId, name: 'T1 Member', email: 't1@test.com', role: 'T1_VOLUNTEER' }),
     }));
 
-    t.mock.method(ShiftAssignment, 'findOne', () => ({
-      lean: async () => ({ _id: id('5'), startTime: '09:00', endTime: '13:00' }),
+    t.mock.method(Team, 'findOne', () => ({
+      _id: teamId,
+      name: 'Alpha Team',
+      leadId,
+      members: [memberId],
     }));
+
+    t.mock.method(DailyAttendance, 'findOne', async () => null);
+    t.mock.method(ShiftAssignment, 'findOne', () => ({ lean: async () => null }));
 
     let auditLogged = false;
-    t.mock.method(AuditLog, 'create', async () => {
+    let auditAction = null;
+    t.mock.method(AuditLog, 'create', async (doc) => {
       auditLogged = true;
+      auditAction = doc.action;
       return true;
     });
-
-    t.mock.method(DailyAttendance, 'findOne', async () => ({
-      status: 'LATE',
-      rawPunchId: id('6'),
-    }));
 
     t.mock.method(DailyAttendance, 'findOneAndUpdate', async (_, update) => ({
       ...update.$set,
     }));
 
+    const otherTeamId = id('8');
     const result = await workforceService.markManualAttendance({
       userId: memberId,
-      teamId,
-      date: '2026-10-20',
+      teamId: otherTeamId, // should be ignored
+      date: '2026-10-14',
       status: 'PRESENT',
-      reason: 'Verified manual arrival at venue on time',
     }, { sub: leadId.toString(), role: 'T3_EXECUTIVE', name: 'Lead' });
 
     assert.equal(result.status, 'PRESENT');
+    assert.equal(result.teamId.toString(), teamId.toString(), 'Team must come from database, ignoring request body');
     assert.equal(result.markedMethod, 'manual_lead');
-    assert.equal(auditLogged, true, 'Audit log must be created when overriding raw punch');
+    assert.equal(auditLogged, true);
+    assert.equal(auditAction, 'ATTENDANCE_MANUAL_MARK');
+  });
+
+  test('Manual Attendance: T3 of another team is rejected', async (t) => {
+    t.mock.method(User, 'findById', () => ({
+      select: async () => ({ _id: memberId, name: 'T1 Member', email: 't1@test.com', role: 'T1_VOLUNTEER' }),
+    }));
+    t.mock.method(Team, 'findOne', () => null);
+
+    await assert.rejects(
+      async () => {
+        await workforceService.markManualAttendance({
+          userId: memberId,
+          date: '2026-10-14',
+          status: 'PRESENT',
+        }, { sub: id('9').toString(), role: 'T3_EXECUTIVE' });
+      },
+      /You are not the designated lead/
+    );
+  });
+
+  test('Bulk Attendance: markAllPresent skips already marked members and writes single audit', async (t) => {
+    t.mock.method(Team, 'findOne', () => ({
+      _id: teamId,
+      leadId,
+      members: [memberId, outsiderId],
+    }));
+
+    t.mock.method(DailyAttendance, 'find', async () => [{ userId: memberId, date: '2026-10-14' }]);
+    t.mock.method(User, 'find', async () => [
+      { _id: memberId, name: 'Member', email: 'mem@test.com', role: 'T1_VOLUNTEER' },
+      { _id: outsiderId, name: 'Outsider', email: 'out@test.com', role: 'T1_VOLUNTEER' },
+    ]);
+
+    let createdDocs = [];
+    t.mock.method(DailyAttendance, 'create', async (doc) => {
+      createdDocs.push(doc);
+      return doc;
+    });
+
+    let bulkAudit = null;
+    t.mock.method(AuditLog, 'create', async (doc) => {
+      bulkAudit = doc;
+      return true;
+    });
+
+    const res = await workforceService.markAllPresent({
+      date: '2026-10-14',
+    }, { sub: leadId.toString(), role: 'T3_EXECUTIVE' });
+
+    assert.equal(res.markedCount, 1);
+    assert.equal(res.skippedCount, 1);
+    assert.equal(createdDocs.length, 1);
+    assert.equal(createdDocs[0].userId.toString(), outsiderId.toString());
+    assert.ok(bulkAudit);
+    assert.equal(bulkAudit.action, 'ATTENDANCE_BULK_MARK_PRESENT');
   });
 
   test('Day Timesheet: blocks submissions older than 7 days', async (t) => {
@@ -355,19 +474,29 @@ describe('Workforce Module Unit Tests', () => {
   });
 
   test('CSV Export: sanitizes formula injection characters', async (t) => {
-    t.mock.method(workforceService, 'getAttendanceRegister', async () => [
-      {
-        date: '2026-10-20',
-        userName: '=SUM(A1:A10)',
-        userEmail: '+123456789@test.com',
-        userRole: '-DANGEROUS',
-        status: '@ADMIN',
-        markedMethod: 'manual_lead',
-        shiftStart: '09:00',
-        shiftEnd: '13:00',
-        manualEntry: { markedByName: 'Lead', reason: 'Normal attendance' },
-      },
-    ]);
+    t.mock.method(workforceService, 'getAttendanceRegister', async () => ({
+      team: { _id: teamId, name: 'Alpha' },
+      dateRange: { startDate: '2026-10-01', endDate: '2026-10-31' },
+      members: [
+        { userId: memberId.toString(), name: '=SUM(A1:A10)', email: '+123456789@test.com', role: '-DANGEROUS' },
+      ],
+      attendance: [
+        {
+          userId: memberId.toString(),
+          date: '2026-10-20',
+          userName: '=SUM(A1:A10)',
+          userEmail: '+123456789@test.com',
+          userRole: '-DANGEROUS',
+          status: '@ADMIN',
+          markedMethod: 'manual_lead',
+          source: 'manual',
+          shiftStart: '09:00',
+          shiftEnd: '13:00',
+          note: 'Normal attendance',
+        },
+      ],
+      assignments: [],
+    }));
 
     const { csv } = await workforceService.exportMonthlyRegisterCSV(teamId, '2026-10');
 

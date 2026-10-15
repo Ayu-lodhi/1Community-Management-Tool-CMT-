@@ -90,9 +90,18 @@ exports.markManualAttendance = async (req, res) => {
   }
 };
 
+exports.markAllPresent = async (req, res) => {
+  try {
+    const data = await service.markAllPresent(req.body, req.user);
+    res.status(200).json({ success: true, message: `Marked ${data.markedCount} present (${data.skippedCount} skipped)`, data });
+  } catch (err) {
+    handleWorkforceError(res, err);
+  }
+};
+
 exports.getAttendanceRegister = async (req, res) => {
   try {
-    const data = await service.getAttendanceRegister(req.query.teamId, req.query.month);
+    const data = await service.getAttendanceRegister(req.query, req.user);
     res.status(200).json({ success: true, data });
   } catch (err) {
     handleWorkforceError(res, err);
@@ -185,7 +194,7 @@ exports.getMonthLockStatus = async (req, res) => {
 // 7. Export
 exports.exportMonthlyRegister = async (req, res) => {
   try {
-    const { csv, filename } = await service.exportMonthlyRegisterCSV(req.query.teamId, req.query.month);
+    const { csv, filename } = await service.exportMonthlyRegisterCSV(req.query, req.user);
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.status(200).send(csv);

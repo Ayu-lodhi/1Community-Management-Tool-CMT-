@@ -39,7 +39,21 @@ router.post('/attendance/manual',
   checkMonthNotLocked('date'),
   controller.markManualAttendance
 );
-router.get('/attendance/register', restrictTo('T3_EXECUTIVE', 'ADMIN', 'SUPER_ADMIN'), requireTeamLeadOrAdmin, controller.getAttendanceRegister);
+router.put('/attendance/manual',
+  attendanceGenerateLimiter,
+  restrictTo('T3_EXECUTIVE', 'ADMIN', 'SUPER_ADMIN'),
+  requireTeamLeadOrAdmin,
+  checkMonthNotLocked('date'),
+  controller.markManualAttendance
+);
+router.post('/attendance/mark-all-present',
+  attendanceGenerateLimiter,
+  restrictTo('T3_EXECUTIVE', 'ADMIN', 'SUPER_ADMIN'),
+  requireTeamLeadOrAdmin,
+  checkMonthNotLocked('date'),
+  controller.markAllPresent
+);
+router.get('/attendance/register', controller.getAttendanceRegister);
 
 // 4b. Attendance Regularization
 router.post('/attendance/regularize',

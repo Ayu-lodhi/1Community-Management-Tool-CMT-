@@ -26,7 +26,7 @@ const requireTeamLeadOrAdmin = async (req, res, next) => {
   try {
     const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(req.user?.role);
     if (isAdmin) {
-      if (req.method === 'POST' && req.path === '/tasks') {
+      if (req.method === 'POST' && (req.path === '/tasks' || req.path === '/attendance/mark-all-present')) {
         const teamId = req.body?.teamId;
         if (!teamId) {
           return res.status(400).json({ success: false, message: 'teamId is required for administrators' });
@@ -40,14 +40,21 @@ const requireTeamLeadOrAdmin = async (req, res, next) => {
       return next();
     }
 
-    if (req.user?.role === 'T3_EXECUTIVE' && req.method === 'POST' && req.path === '/tasks') {
-      const ledTeam = await Team.findOne({ leadId: req.user.sub }).select('leadId');
-      if (!ledTeam) {
-        return res.status(403).json({ success: false, message: 'You are not designated as lead for any team' });
+    if (req.user?.role === 'T3_EXECUTIVE') {
+      if (req.method === 'POST' && (req.path === '/tasks' || req.path === '/attendance/mark-all-present')) {
+        const ledTeam = await Team.findOne({ leadId: req.user.sub }).select('leadId');
+        if (!ledTeam) {
+          return res.status(403).json({ success: false, message: 'You are not designated as lead for any team' });
+        }
+        req.team = ledTeam;
+        req.body.teamId = ledTeam._id;
+        return next();
       }
-      req.team = ledTeam;
-      req.body.teamId = ledTeam._id;
-      return next();
+
+      if (req.path === '/attendance/manual') {
+        // Team and lead authorization are verified directly from DB in service
+        return next();
+      }
     }
 
     const teamId = req.body?.teamId || req.query?.teamId || req.params?.teamId;
