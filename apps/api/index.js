@@ -18,12 +18,32 @@ if (!cached) {
 let lastDbError = null;
 let lastDbErrorStack = null;
 
+const normalizeMongoUri = (rawUri) => {
+  if (!rawUri || typeof rawUri !== 'string') return rawUri;
+  if (rawUri.startsWith('mongodb+srv://') && rawUri.includes('-shard-00-00.')) {
+    try {
+      const prefix = rawUri.replace('mongodb+srv://', 'mongodb://');
+      const [userPart, rest] = prefix.split('@');
+      if (rest) {
+        const [hostPart, queryPart] = rest.split('/');
+        const baseDomain = hostPart.replace('ac-gkiqwag-shard-00-00.', '');
+        const hosts = ['00-00', '00-01', '00-02'].map((s) => `ac-gkiqwag-shard-${s}.${baseDomain}:27017`).join(',');
+        const dbAndQuery = queryPart || 'tbi_db';
+        const sep = dbAndQuery.includes('?') ? '&' : '?';
+        return `${userPart}@${hosts}/${dbAndQuery}${dbAndQuery.includes('ssl=') ? '' : `${sep}ssl=true&replicaSet=atlas-6g5sz6-shard-0&authSource=admin`}`;
+      }
+    } catch (_) {}
+  }
+  return rawUri;
+};
+
 async function connectToDatabase() {
   if (mongoose.connection?.readyState === 1) {
     return mongoose.connection;
   }
-  const uri = process.env.MONGODB_URI;
-  if (!uri) return null;
+  const rawUri = process.env.MONGODB_URI;
+  if (!rawUri) return null;
+  const uri = normalizeMongoUri(rawUri);
 
   if (!cached.promise || mongoose.connection.readyState === 0 || mongoose.connection.readyState === 3) {
     cached.promise = mongoose.connect(uri, { serverSelectionTimeoutMS: 8000 }).then((m) => {
