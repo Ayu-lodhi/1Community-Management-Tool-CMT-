@@ -53,6 +53,13 @@ export const T3WorkforcePage = () => {
   const [markForm, setMarkForm] = useState({ userId: '', userName: '', date: '', status: 'PRESENT', reason: '' });
   const [actionLoading, setActionLoading] = useState(false);
 
+  // Inline Custom Task state inside Assign Shift modal
+  const [showCustomTask, setShowCustomTask] = useState(false);
+  const [customTaskTitle, setCustomTaskTitle] = useState('');
+  const [customTaskDesc, setCustomTaskDesc] = useState('');
+  const [savingCustomTask, setSavingCustomTask] = useState(false);
+  const [customTaskError, setCustomTaskError] = useState('');
+
   // 1. Fetch available teams
   useEffect(() => {
     const fetchTeams = async () => {
@@ -171,6 +178,42 @@ export const T3WorkforcePage = () => {
     }
   };
 
+  // Save inline custom task inside Assign Shift modal
+  const handleSaveCustomTask = async () => {
+    if (!customTaskTitle.trim()) {
+      setCustomTaskError('Task title is required');
+      return;
+    }
+    setSavingCustomTask(true);
+    setCustomTaskError('');
+    try {
+      const res = await api.post('/workforce/tasks', {
+        title: customTaskTitle.trim(),
+        description: customTaskDesc.trim(),
+        teamId: selectedTeamId,
+        source: 'assign_modal',
+      });
+      const newTask = res.data?.data;
+      if (newTask?._id) {
+        setTasks((prev) => {
+          if (prev.some((t) => t._id === newTask._id)) return prev;
+          return [newTask, ...prev];
+        });
+        setAssignForm((prev) => ({
+          ...prev,
+          taskIds: prev.taskIds.includes(newTask._id) ? prev.taskIds : [...prev.taskIds, newTask._id],
+        }));
+        setCustomTaskTitle('');
+        setCustomTaskDesc('');
+        setShowCustomTask(false);
+      }
+    } catch (err) {
+      setCustomTaskError(err.response?.data?.message || err.message || 'Failed to save task');
+    } finally {
+      setSavingCustomTask(false);
+    }
+  };
+
   // Create Shift Assignment
   const handleCreateAssignment = async (e) => {
     e.preventDefault();
@@ -184,10 +227,20 @@ export const T3WorkforcePage = () => {
       setSuccessMsg('Shift assigned successfully!');
       setAssignModalOpen(false);
       setAssignForm({ userId: '', shiftTemplateId: '', date: '', taskIds: [], repeatWeekly: false });
+      setShowCustomTask(false);
+      setCustomTaskTitle('');
+      setCustomTaskDesc('');
+      setCustomTaskError('');
       await loadTeamData();
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err) {
-      setErrorMsg(err.response?.data?.message || err.message);
+      const hasTasks = assignForm.taskIds && assignForm.taskIds.length > 0;
+      const baseErr = err.response?.data?.message || err.message;
+      if (hasTasks) {
+        setErrorMsg(`${baseErr}. Note: Newly saved tasks remain available in your task checklist.`);
+      } else {
+        setErrorMsg(baseErr);
+      }
     } finally {
       setActionLoading(false);
     }
@@ -473,6 +526,10 @@ export const T3WorkforcePage = () => {
                                     taskIds: [],
                                     repeatWeekly: false,
                                   });
+                                  setShowCustomTask(false);
+                                  setCustomTaskTitle('');
+                                  setCustomTaskDesc('');
+                                  setCustomTaskError('');
                                   setAssignModalOpen(true);
                                 }}
                                 className="w-full h-full py-4 text-center text-slate-300 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg border border-dashed border-slate-200 transition-colors cursor-pointer"
@@ -677,9 +734,9 @@ export const T3WorkforcePage = () => {
                 )}
               </div>
 
-              {tasks.length > 0 && (
-                <div>
-                  <label className="block font-bold mb-1">Associate Tasks (Optional)</label>
+              <div>
+                <label className="block font-bold mb-1">Associate Tasks (Optional)</label>
+                {tasks.length > 0 ? (
                   <div className="max-h-32 overflow-y-auto border border-slate-300 rounded-lg p-2 space-y-1">
                     {tasks.map((task) => {
                       const checked = assignForm.taskIds.includes(task._id);
@@ -701,8 +758,80 @@ export const T3WorkforcePage = () => {
                       );
                     })}
                   </div>
+                ) : (
+                  <p className="text-[11px] text-slate-400 italic">No tasks created yet for this team.</p>
+                )}
+
+                {/* Inline Add Custom Task */}
+                <div className="pt-2">
+                  {!showCustomTask ? (
+                    <button
+                      type="button"
+                      onClick={() => { setShowCustomTask(true); setCustomTaskError(''); }}
+                      className="text-[11px] font-bold text-[#1B5299] hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" /> Add custom task
+                    </button>
+                  ) : (
+                    <div className="p-3 bg-slate-50 border border-slate-300 rounded-xl space-y-2 mt-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[11px] text-slate-700">New Custom Task</span>
+                        <button
+                          type="button"
+                          disabled={savingCustomTask}
+                          onClick={() => { setShowCustomTask(false); setCustomTaskError(''); }}
+                          className="text-slate-400 hover:text-slate-600"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      {customTaskError && (
+                        <p className="text-[10px] text-red-600 font-bold">{customTaskError}</p>
+                      )}
+                      <div>
+                        <input
+                          type="text"
+                          maxLength={100}
+                          placeholder="Task title (required, max 100 chars)"
+                          value={customTaskTitle}
+                          onChange={(e) => setCustomTaskTitle(e.target.value)}
+                          className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs outline-none"
+                        />
+                        <div className="text-[9px] text-slate-400 text-right mt-0.5">{customTaskTitle.length}/100</div>
+                      </div>
+                      <div>
+                        <textarea
+                          rows="2"
+                          maxLength={500}
+                          placeholder="Task description (optional, max 500 chars)"
+                          value={customTaskDesc}
+                          onChange={(e) => setCustomTaskDesc(e.target.value)}
+                          className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs outline-none"
+                        />
+                        <div className="text-[9px] text-slate-400 text-right mt-0.5">{customTaskDesc.length}/500</div>
+                      </div>
+                      <div className="flex justify-end gap-1.5 pt-1">
+                        <button
+                          type="button"
+                          disabled={savingCustomTask}
+                          onClick={() => { setShowCustomTask(false); setCustomTaskError(''); }}
+                          className="px-2.5 py-1 text-[11px] border border-slate-300 rounded-lg hover:bg-slate-100 font-bold cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={savingCustomTask || !customTaskTitle.trim()}
+                          onClick={handleSaveCustomTask}
+                          className="px-3 py-1 text-[11px] bg-[#1B5299] hover:bg-[#15427C] text-white rounded-lg font-bold cursor-pointer disabled:opacity-50"
+                        >
+                          {savingCustomTask ? 'Saving...' : 'Save task'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
 
               {/* Repeat Weekly Option */}
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
