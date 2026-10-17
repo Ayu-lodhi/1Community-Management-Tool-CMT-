@@ -13,6 +13,10 @@ import '../src/modules/timesheets/timesheets.model.js';
 import '../src/modules/announcements/announcements.model.js';
 import '../src/modules/chat/chat.model.js';
 import '../src/modules/notifications/notifications.model.js';
+import '../src/models/hr_PerformanceFactor.model.js';
+import '../src/models/hr_PerformanceReview.model.js';
+import '../src/models/hr_IncidentReport.model.js';
+import '../src/models/hr_AttendancePolicy.model.js';
 
 const URI = process.env.MONGODB_URI;
 if (!URI) {
@@ -37,7 +41,11 @@ async function run() {
     mongoose.models.AttendanceLink,
     mongoose.models.Certificate,
     mongoose.models.Profile,
-    mongoose.models.Timesheet
+    mongoose.models.Timesheet,
+    mongoose.models.HrPerformanceFactor,
+    mongoose.models.HrPerformanceReview,
+    mongoose.models.HrIncidentReport,
+    mongoose.models.HrAttendancePolicy
   ].filter(Boolean);
 
   const performanceModels = [
