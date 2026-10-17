@@ -19,6 +19,7 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { T3WorkforcePage } from './pages/workforce/T3WorkforcePage';
 import { MyWorkforcePage } from './pages/workforce/MyWorkforcePage';
 import { T3ApprovalsPage } from './pages/workforce/T3ApprovalsPage';
+import { PerformanceHubPage, IncidentHubPage, AttendanceExceptionsPage } from './pages/hr';
 
 const RootRedirect = () => {
   const { user, initializing } = useAuth();
@@ -100,6 +101,10 @@ function App() {
             <Route path="/admin/applications" element={<ProtectedRoute roles={['ADMIN', 'SUPER_ADMIN']}><ApplicationsPage /></ProtectedRoute>} />
             <Route path="/approval-requests" element={<ProtectedRoute><ApplicationsPage /></ProtectedRoute>} />
 
+            {/* HR Operations */}
+            <Route path="/hr/performance" element={<ProtectedRoute><PerformanceHubPage /></ProtectedRoute>} />
+            <Route path="/hr/incidents" element={<ProtectedRoute><IncidentHubPage /></ProtectedRoute>} />
+            <Route path="/hr/attendance-exceptions" element={<ProtectedRoute roles={['T3_EXECUTIVE', 'ADMIN', 'SUPER_ADMIN']}><AttendanceExceptionsPage /></ProtectedRoute>} />
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
