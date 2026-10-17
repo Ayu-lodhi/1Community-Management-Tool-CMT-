@@ -12,6 +12,8 @@ const SENSITIVE_PATTERNS = [
   'phone',
   'otp',
   'credit',
+  'pan',
+  'aadhar',
 ];
 
 /**
