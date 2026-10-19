@@ -57,7 +57,13 @@ export const PERMISSIONS = Object.freeze({
   ANALYTICS_PLATFORM_READ: 'analytics:platform_read',
   ANALYTICS_TEAM_READ: 'analytics:team_read',
   AUDIT_LOGS_READ: 'audit_logs:read',
-  SYSTEM_CONFIG_MANAGE: 'system_config:manage'
+  SYSTEM_CONFIG_MANAGE: 'system_config:manage',
+
+  // HR Module
+  HR_MASTERS_MANAGE: 'hr:masters_manage',
+  HR_INCIDENTS_MANAGE: 'hr:incidents_manage',
+  HR_REVIEWS_MANAGE: 'hr:reviews_manage',
+  HR_EXPORT: 'hr:export',
 });
 
 /**
@@ -97,7 +103,11 @@ export const ROLE_DEFAULT_PERMISSIONS = Object.freeze({
     PERMISSIONS.CERTIFICATES_GENERATE,
     PERMISSIONS.ANALYTICS_PLATFORM_READ,
     PERMISSIONS.ANALYTICS_TEAM_READ,
-    PERMISSIONS.AUDIT_LOGS_READ
+    PERMISSIONS.AUDIT_LOGS_READ,
+    PERMISSIONS.HR_MASTERS_MANAGE,
+    PERMISSIONS.HR_INCIDENTS_MANAGE,
+    PERMISSIONS.HR_REVIEWS_MANAGE,
+    PERMISSIONS.HR_EXPORT,
   ],
 
   [ROLES.T3_EXECUTIVE]: [
