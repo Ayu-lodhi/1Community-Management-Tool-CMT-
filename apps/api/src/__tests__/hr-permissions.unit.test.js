@@ -90,19 +90,23 @@ test('T3 lead-of-person check: isLeadOfPerson and getLedMemberIds', async (t) =>
       request.endsWith('teams.model.js') ||
       (request.includes('teams') && request.includes('model'))
     ) {
+      const teamsData = [
+        { _id: 'teamA', leadId: LEAD_ID, members: [MEMBER_A] },
+        { _id: 'teamB', leadId: LEAD_ID, members: [MEMBER_B] },
+      ];
       return {
         findOne({ leadId, members } = {}) {
           const l = leadId?.toString();
           const m = members?.toString();
-          if (l === LEAD_ID && m === MEMBER_A) return { lean: () => ({ _id: 'teamA' }) };
-          if (l === LEAD_ID && m === MEMBER_B) return { lean: () => ({ _id: 'teamB' }) };
-          return { lean: () => null };
+          const matched = teamsData.find(
+            (t) => (!l || String(t.leadId) === l) && (!m || t.members.map(String).includes(m))
+          );
+          return { lean: () => matched ? { ...matched } : null };
         },
         find({ leadId } = {}) {
-          if (leadId?.toString() === LEAD_ID) {
-            return { select: () => ({ lean: () => [{ members: [MEMBER_A, MEMBER_B] }] }) };
-          }
-          return { select: () => ({ lean: () => [] }) };
+          const l = leadId?.toString();
+          const matched = teamsData.filter((t) => !l || String(t.leadId) === l);
+          return { select: () => ({ lean: () => matched }) };
         },
       };
     }

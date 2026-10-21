@@ -312,6 +312,7 @@ const MENUS = {
         { icon: Users, label: 'Users', to: '/admin/users' },
         { icon: UserPlus, label: 'Add User', to: '/admin/users/new' },
         { icon: Upload, label: 'Bulk Import', to: '/admin/users/bulk' },
+        { icon: Users, label: 'Member Operations', to: '/hr' },
       ]
     },
     {
@@ -348,6 +349,7 @@ const MENUS = {
         { icon: Users, label: 'Users', to: '/admin/users' },
         { icon: UserPlus, label: 'Add User', to: '/admin/users/new' },
         { icon: Upload, label: 'Bulk Import', to: '/admin/users/bulk' },
+        { icon: Users, label: 'Member Operations', to: '/hr' },
       ]
     },
     {
@@ -377,6 +379,7 @@ const MENUS = {
         { icon: FileCheck, label: 'Timesheet Approvals', to: '/t3/approvals' },
         { icon: UsersRound, label: 'My Teams', to: '/t3/teams' },
         { icon: Users, label: 'Team Profiles', to: '/profile/team' },
+        { icon: Award, label: 'Team Evaluations', to: '/hr' },
         { icon: FileCheck, label: 'Approval Requests', to: '/t3/applications' },
         { icon: CheckCircle, label: 'Attendance', to: '/t3/attendance' },
         { icon: Clock, label: 'My Schedule', to: '/my-workforce' },

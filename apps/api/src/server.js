@@ -82,6 +82,7 @@ app.use('/api/v1/announcements', require('./modules/announcements/announcements.
 app.use('/api/v1/timesheets', require('./modules/timesheets/timesheets.routes'));
 app.use('/api/v1/workforce', require('./modules/workforce/workforce.routes'));
 app.use('/api/v1/profile', require('./modules/profile/profile.routes'));
+app.use('/api/v1/hr', require('./modules/hr/hr.routes'));
 app.patch('/api/v1/admin/users/:userId/tier', protect, restrictTo('ADMIN', 'SUPER_ADMIN'), createUserLimiter, require('./modules/profile/profile.controller').updateUserTier);
 
 app.get('/', publicCache(120), (req, res) => {

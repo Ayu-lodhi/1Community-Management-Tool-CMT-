@@ -99,20 +99,26 @@ export const api = {
     }
 
     const token = getToken();
-    const res = await fetchWithRetry(`${API_BASE}${url}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-    const data = await parseResponseJson(res);
+    const headers = {
+      ...(options.responseType !== 'blob' ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {}),
+    };
+    const res = await fetchWithRetry(`${API_BASE}${url}`, { headers });
     if (!res.ok) {
+      const data = await parseResponseJson(res);
       handleUnauthorized(res.status, data?.message);
       const err = new Error(data?.message || 'API request failed');
       err.response = { data, status: res.status };
       throw err;
     }
 
+    if (options.responseType === 'blob') {
+      const blobData = await res.blob();
+      return { data: blobData };
+    }
+
+    const data = await parseResponseJson(res);
     const result = { data };
     if (shouldCache) {
       clientCache.set(url, {
@@ -129,6 +135,27 @@ export const api = {
     const token = getToken();
     const res = await fetchWithRetry(`${API_BASE}${url}`, {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await parseResponseJson(res);
+    if (!res.ok) {
+      handleUnauthorized(res.status, data?.message);
+      const err = new Error(data?.message || 'API request failed');
+      err.response = { data, status: res.status };
+      throw err;
+    }
+    return { data };
+  },
+  put: async (url, body) => {
+    touchActivity();
+    clearClientCache();
+    const token = getToken();
+    const res = await fetchWithRetry(`${API_BASE}${url}`, {
+      method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
