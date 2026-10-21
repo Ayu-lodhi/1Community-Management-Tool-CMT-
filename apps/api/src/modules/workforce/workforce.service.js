@@ -494,16 +494,25 @@ class WorkforceService {
     let targetTeam;
 
     if (requester.role === 'T3_EXECUTIVE') {
-      targetTeam = await Team.findOne({ leadId: requester.sub });
+      const filter = { leadId: requester.sub };
+      if (teamId) filter._id = teamId;
+      targetTeam = await Team.findOne(filter).lean();
+      if (!targetTeam && teamId) {
+        targetTeam = await Team.findOne({ leadId: requester.sub }).lean();
+      }
       if (!targetTeam) throw new AuthorizationError('You are not designated as lead for any team');
     } else if (isPrivileged) {
-      if (!teamId) throw new ValidationError('teamId is required for administrators');
-      targetTeam = await Team.findById(teamId);
-      if (!targetTeam) throw new ValidationError('Team not found');
+      if (!teamId) {
+        targetTeam = await Team.findOne().lean();
+        if (!targetTeam) throw new ValidationError('No teams found in the system');
+      } else {
+        targetTeam = await Team.findById(teamId).lean();
+        if (!targetTeam) throw new ValidationError('Team not found');
+      }
     } else {
       // T1 / T2
       const targetUser = await User.findById(requester.sub).select('teamId');
-      targetTeam = targetUser?.teamId ? await Team.findById(targetUser.teamId) : await Team.findOne({ members: requester.sub });
+      targetTeam = targetUser?.teamId ? await Team.findById(targetUser.teamId).lean() : await Team.findOne({ members: requester.sub }).lean();
       if (!targetTeam) throw new ValidationError('You are not assigned to a team');
     }
 
@@ -517,11 +526,57 @@ class WorkforceService {
       }
     }
 
-    const [membersDocs, attendanceDocs, assignmentDocs] = await Promise.all([
+    const Application = require('../applications/applications.model');
+
+    // Index-friendly parallel queries: Use teamId when available to hit compound indexes directly
+    const attFilter = (!isPrivileged && requester.role !== 'T3_EXECUTIVE')
+      ? { userId: requester.sub, date: { $gte: start, $lte: end } }
+      : { teamId: targetTeam._id, date: { $gte: start, $lte: end } };
+
+    const assignFilter = (!isPrivileged && requester.role !== 'T3_EXECUTIVE')
+      ? { userId: requester.sub, date: { $gte: start, $lte: end } }
+      : { teamId: targetTeam._id, date: { $gte: start, $lte: end } };
+
+    const [membersDocs, attendanceDocs, assignmentDocs, approvedLeaveApps] = await Promise.all([
       User.find({ _id: { $in: memberIds } }).select('name email role userId').lean(),
-      DailyAttendance.find({ userId: { $in: memberIds }, date: { $gte: start, $lte: end } }).lean(),
-      ShiftAssignment.find({ userId: { $in: memberIds }, date: { $gte: start, $lte: end } }).lean(),
+      DailyAttendance.find(attFilter).lean(),
+      ShiftAssignment.find(assignFilter).lean(),
+      Application.find({
+        studentId: { $in: memberIds },
+        targetDate: { $gte: start, $lte: end },
+        status: 'approved',
+        requestType: { $in: ['leave', 'half_day'] },
+      }).lean().catch(() => []),
     ]);
+
+    // Ensure approved leaves are represented in attendance
+    const existingAttKeys = new Set(attendanceDocs.map((a) => `${a.userId?.toString()}_${a.date}`));
+    for (const app of approvedLeaveApps) {
+      const studentIdStr = app.studentId?.toString();
+      const key = `${studentIdStr}_${app.targetDate}`;
+      if (!existingAttKeys.has(key)) {
+        const leaveStatus = app.requestType === 'half_day' ? 'HALF_DAY' : 'ON_LEAVE';
+        attendanceDocs.push({
+          _id: app._id,
+          userId: app.studentId,
+          userName: app.studentName,
+          userEmail: app.studentEmail,
+          userRole: app.role || 'T1_VOLUNTEER',
+          teamId: targetTeam._id,
+          date: app.targetDate,
+          status: leaveStatus,
+          originalStatus: leaveStatus,
+          markedMethod: 'manual_lead',
+          manualEntry: {
+            markedBy: app.reviewedBy || targetTeam.leadId,
+            markedByName: app.reviewedByName || 'Lead',
+            markedAt: app.reviewedAt || new Date(),
+            reason: app.reason || 'Approved leave request',
+          },
+        });
+        existingAttKeys.add(key);
+      }
+    }
 
     const rows = membersDocs.map((member) => {
       const mId = member._id.toString();

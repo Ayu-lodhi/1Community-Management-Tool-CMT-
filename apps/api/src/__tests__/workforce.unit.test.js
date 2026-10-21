@@ -255,6 +255,7 @@ describe('Workforce Module Unit Tests', () => {
   });
 
   test('Manual Attendance: rejects override of a QR-scanned day without a note', async (t) => {
+    const recentDate = new Date(Date.now() - 86400000).toISOString().split('T')[0];
     t.mock.method(User, 'findById', () => ({
       select: async () => ({ _id: memberId, name: 'T1 Member', email: 't1@test.com', role: 'T1_VOLUNTEER' }),
     }));
@@ -273,7 +274,7 @@ describe('Workforce Module Unit Tests', () => {
       async () => {
         await workforceService.markManualAttendance({
           userId: memberId,
-          date: '2026-10-14',
+          date: recentDate,
           status: 'PRESENT',
           note: '',
         }, { sub: leadId.toString(), role: 'T3_EXECUTIVE' });
@@ -283,6 +284,7 @@ describe('Workforce Module Unit Tests', () => {
   });
 
   test('Manual Attendance: T3 marks own team member OK, ignores team in request body, and writes audit', async (t) => {
+    const recentDate = new Date(Date.now() - 86400000).toISOString().split('T')[0];
     t.mock.method(User, 'findById', () => ({
       select: async () => ({ _id: memberId, name: 'T1 Member', email: 't1@test.com', role: 'T1_VOLUNTEER' }),
     }));
@@ -313,7 +315,7 @@ describe('Workforce Module Unit Tests', () => {
     const result = await workforceService.markManualAttendance({
       userId: memberId,
       teamId: otherTeamId, // should be ignored
-      date: '2026-10-14',
+      date: recentDate,
       status: 'PRESENT',
     }, { sub: leadId.toString(), role: 'T3_EXECUTIVE', name: 'Lead' });
 
@@ -325,6 +327,7 @@ describe('Workforce Module Unit Tests', () => {
   });
 
   test('Manual Attendance: T3 of another team is rejected', async (t) => {
+    const recentDate = new Date(Date.now() - 86400000).toISOString().split('T')[0];
     t.mock.method(User, 'findById', () => ({
       select: async () => ({ _id: memberId, name: 'T1 Member', email: 't1@test.com', role: 'T1_VOLUNTEER' }),
     }));
@@ -334,7 +337,7 @@ describe('Workforce Module Unit Tests', () => {
       async () => {
         await workforceService.markManualAttendance({
           userId: memberId,
-          date: '2026-10-14',
+          date: recentDate,
           status: 'PRESENT',
         }, { sub: id('9').toString(), role: 'T3_EXECUTIVE' });
       },
@@ -343,13 +346,14 @@ describe('Workforce Module Unit Tests', () => {
   });
 
   test('Bulk Attendance: markAllPresent skips already marked members and writes single audit', async (t) => {
+    const recentDate = new Date(Date.now() - 86400000).toISOString().split('T')[0];
     t.mock.method(Team, 'findOne', () => ({
       _id: teamId,
       leadId,
       members: [memberId, outsiderId],
     }));
 
-    t.mock.method(DailyAttendance, 'find', async () => [{ userId: memberId, date: '2026-10-14' }]);
+    t.mock.method(DailyAttendance, 'find', async () => [{ userId: memberId, date: recentDate }]);
     t.mock.method(User, 'find', async () => [
       { _id: memberId, name: 'Member', email: 'mem@test.com', role: 'T1_VOLUNTEER' },
       { _id: outsiderId, name: 'Outsider', email: 'out@test.com', role: 'T1_VOLUNTEER' },
@@ -368,7 +372,7 @@ describe('Workforce Module Unit Tests', () => {
     });
 
     const res = await workforceService.markAllPresent({
-      date: '2026-10-14',
+      date: recentDate,
     }, { sub: leadId.toString(), role: 'T3_EXECUTIVE' });
 
     assert.equal(res.markedCount, 1);
@@ -674,5 +678,137 @@ describe('Workforce Module Unit Tests', () => {
     const status = await workforceService.getMonthLockStatus('2026-10');
     assert.equal(status.isLocked, true);
     assert.equal(status.month, '2026-10');
+  });
+
+  test('Shift Assignments: team members (T1/T2) have read-only access to their team assignments', async (t) => {
+    const { requireTeamLeadOrAdmin } = require('../modules/workforce/workforce.middleware');
+    const mockTeam = {
+      _id: teamId,
+      leadId,
+      members: [memberId],
+    };
+    t.mock.method(Team, 'findById', () => ({
+      select: async () => mockTeam,
+    }));
+
+    let nextCalled = false;
+    const req = {
+      method: 'GET',
+      path: '/assignments/team',
+      query: { teamId: teamId.toString() },
+      user: { sub: memberId.toString(), role: 'T1_VOLUNTEER' },
+    };
+    await requireTeamLeadOrAdmin(req, {}, () => { nextCalled = true; });
+    assert.equal(nextCalled, true, 'Team member must be allowed read-only access to team shift assignments');
+
+    // Non-team member is rejected
+    let rejectedStatus = null;
+    let rejectedMsg = null;
+    const nonMemberReq = {
+      method: 'GET',
+      path: '/assignments/team',
+      query: { teamId: teamId.toString() },
+      user: { sub: id('f').toString(), role: 'T1_VOLUNTEER' },
+    };
+    await requireTeamLeadOrAdmin(nonMemberReq, {
+      status: (code) => {
+        rejectedStatus = code;
+        return { json: (data) => { rejectedMsg = data.message; } };
+      },
+    }, () => {});
+    assert.equal(rejectedStatus, 403, 'Non-team member must be rejected with 403');
+  });
+
+  test('Attendance Register: approved leaves are visible in attendance register', async (t) => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    t.mock.method(Team, 'findById', () => ({
+      lean: async () => ({
+        _id: teamId,
+        name: 'Alpha Team',
+        leadId,
+        members: [memberId],
+      }),
+    }));
+    t.mock.method(User, 'find', () => ({
+      select: () => ({
+        lean: async () => [{ _id: memberId, name: 'T1 Member', email: 't1@test.com', role: 'T1_VOLUNTEER' }],
+      }),
+    }));
+    t.mock.method(DailyAttendance, 'find', () => ({
+      lean: async () => [], // No manual attendance marked yet
+    }));
+    t.mock.method(ShiftAssignment, 'find', () => ({
+      lean: async () => [],
+    }));
+    const Application = require('../modules/applications/applications.model');
+    t.mock.method(Application, 'find', () => ({
+      lean: async () => [{
+        _id: id('e'),
+        studentId: memberId,
+        studentName: 'T1 Member',
+        studentEmail: 't1@test.com',
+        role: 'T1_VOLUNTEER',
+        teamId,
+        targetDate: todayStr,
+        status: 'approved',
+        requestType: 'leave',
+        reason: 'Family event',
+        reviewedBy: leadId,
+        reviewedByName: 'Lead',
+        reviewedAt: new Date(),
+      }],
+    }));
+
+    const reg = await workforceService.getAttendanceRegister({ teamId: teamId.toString() }, { role: 'SUPER_ADMIN', sub: id('1') });
+    assert.ok(reg.attendance.length > 0, 'Approved leave must appear in attendance records');
+    assert.equal(reg.attendance[0].status, 'ON_LEAVE');
+    assert.equal(reg.attendance[0].userId, memberId.toString());
+  });
+
+  test('Application Service: approving leave marks both Attendance and DailyAttendance with ON_LEAVE', async (t) => {
+    const applicationService = require('../modules/applications/applications.service');
+    const Application = require('../modules/applications/applications.model');
+    const Attendance = require('../modules/attendance/attendance.model');
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const mockApp = {
+      _id: id('e'),
+      studentId: memberId,
+      studentName: 'T1 Member',
+      studentEmail: 't1@test.com',
+      teamId,
+      teamName: 'Alpha Team',
+      role: 'T1_VOLUNTEER',
+      requestType: 'leave',
+      targetDate: todayStr,
+      reason: 'Sick leave',
+      status: 'pending',
+      save: async () => mockApp,
+    };
+
+    t.mock.method(Application, 'findById', async () => mockApp);
+    t.mock.method(Team, 'findById', async () => ({ _id: teamId, leadId }));
+    t.mock.method(User, 'findById', () => ({ select: async () => ({ _id: leadId, name: 'Lead' }) }));
+
+    let legacyAttendanceUpserted = null;
+    t.mock.method(Attendance, 'findOneAndUpdate', async (filter, update) => {
+      legacyAttendanceUpserted = { filter, update };
+      return update;
+    });
+
+    let dailyAttendanceUpserted = null;
+    t.mock.method(DailyAttendance, 'findOneAndUpdate', async (filter, update) => {
+      dailyAttendanceUpserted = { filter, update };
+      return update;
+    });
+
+    await applicationService.updateStatus(id('e'), 'approved', { sub: leadId.toString(), role: 'T3_EXECUTIVE' });
+
+    assert.ok(legacyAttendanceUpserted, 'Legacy Attendance must be upserted');
+    assert.equal(legacyAttendanceUpserted.update.status, 'on_leave');
+    assert.ok(dailyAttendanceUpserted, 'DailyAttendance must be upserted');
+    assert.equal(dailyAttendanceUpserted.update.$set.status, 'ON_LEAVE');
+    assert.equal(dailyAttendanceUpserted.update.$set.userId.toString(), memberId.toString());
+    assert.equal(dailyAttendanceUpserted.update.$set.date, todayStr);
   });
 });

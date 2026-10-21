@@ -39,7 +39,6 @@ export const T3WorkforcePage = () => {
   const [shiftTemplates, setShiftTemplates] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [assignments, setAssignments] = useState([]);
-  const [registerRecords, setRegisterRecords] = useState([]);
 
   // Modals
   const [shiftModalOpen, setShiftModalOpen] = useState(false);
@@ -65,11 +64,12 @@ export const T3WorkforcePage = () => {
   useEffect(() => {
     const fetchTeams = async () => {
       try {
-        const res = await api.get('/teams/me');
+        const endpoint = isAdmin ? '/teams' : '/teams/me';
+        const res = await api.get(endpoint);
         const list = Array.isArray(res.data?.data) ? res.data.data : [];
         setTeams(list);
         if (list.length > 0) {
-          setSelectedTeamId(list[0]._id);
+          setSelectedTeamId((prev) => prev || list[0]._id);
         }
       } catch (err) {
         setErrorMsg('Failed to load teams: ' + (err.response?.data?.message || err.message));
@@ -78,9 +78,9 @@ export const T3WorkforcePage = () => {
       }
     };
     fetchTeams();
-  }, []);
+  }, [isAdmin]);
 
-  // 2. Fetch team members, templates, tasks, assignments, and register
+  // 2. Fetch team members, templates, tasks, and assignments
   const loadTeamData = useCallback(async () => {
     if (!selectedTeamId) return;
     try {
@@ -98,20 +98,16 @@ export const T3WorkforcePage = () => {
       const teamData = teamRes.data?.data || {};
       const teamMembers = Array.isArray(teamData.members) ? teamData.members : [];
       setMembers(teamMembers);
-
-      if (activeView === 'register') {
-        const monthKey = weekDays[0].slice(0, 7);
-        const regRes = await api.get(`/workforce/attendance/register?teamId=${selectedTeamId}&month=${monthKey}`);
-        setRegisterRecords(regRes.data?.data || []);
-      }
     } catch (err) {
       console.error('Failed to load team workforce data:', err);
     }
-  }, [selectedTeamId, weekDays[0], activeView]);
+  }, [selectedTeamId, weekDays[0]]);
 
   useEffect(() => {
-    loadTeamData();
-  }, [loadTeamData]);
+    if (activeView === 'calendar') {
+      loadTeamData();
+    }
+  }, [loadTeamData, activeView]);
 
   // Week navigation handlers
   const handlePrevWeek = () => {
@@ -479,9 +475,6 @@ export const T3WorkforcePage = () => {
                         {weekDays.map((day) => {
                           const assignment = assignments.find(
                             (a) => a.userId.toString() === mId && a.date === day
-                          );
-                          const reg = registerRecords.find(
-                            (r) => r.userId.toString() === mId && r.date === day
                           );
 
                           return (

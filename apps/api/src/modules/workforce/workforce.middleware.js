@@ -62,14 +62,18 @@ const requireTeamLeadOrAdmin = async (req, res, next) => {
       throw new ValidationError('teamId is required');
     }
 
-    const team = await Team.findById(teamId).select('leadId');
+    const team = await Team.findById(teamId).select('leadId members');
     if (!team) {
       return res.status(404).json({ success: false, message: 'Team not found' });
     }
 
     const isLead = team.leadId && team.leadId.toString() === req.user?.sub;
-    if (!isLead) {
-      throw new AuthorizationError('Only the designated team lead or an administrator can perform this action');
+    // Allow team members (T1/T2) read-only access to their own team's shift assignments
+    const isMemberReadOnly = req.method === 'GET' && req.path === '/assignments/team' &&
+      Array.isArray(team.members) && team.members.some((m) => m.toString() === req.user?.sub);
+
+    if (!isLead && !isMemberReadOnly) {
+      throw new AuthorizationError('Only the designated team lead, team members, or an administrator can perform this action');
     }
 
     req.team = team;

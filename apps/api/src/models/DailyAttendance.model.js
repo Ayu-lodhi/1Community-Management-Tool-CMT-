@@ -39,6 +39,7 @@ const dailyAttendanceSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 dailyAttendanceSchema.index({ userId: 1, date: 1 }, { unique: true });
+dailyAttendanceSchema.index({ teamId: 1, date: 1 });
 dailyAttendanceSchema.index({ teamId: 1, date: 1, status: 1 });
 
 module.exports = mongoose.model('DailyAttendance', dailyAttendanceSchema);

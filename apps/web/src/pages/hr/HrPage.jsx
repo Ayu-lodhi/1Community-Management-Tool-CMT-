@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Users, Award, AlertTriangle, FileText, Settings, ShieldAlert
 } from 'lucide-react';

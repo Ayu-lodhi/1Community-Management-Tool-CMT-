@@ -27,7 +27,7 @@ router.post('/assignments',
   checkMonthNotLocked('date'),
   controller.createAssignment
 );
-router.get('/assignments/team', restrictTo('T3_EXECUTIVE', 'ADMIN', 'SUPER_ADMIN'), requireTeamLeadOrAdmin, controller.getTeamAssignments);
+router.get('/assignments/team', requireTeamLeadOrAdmin, controller.getTeamAssignments);
 router.get('/assignments/me', controller.getMyAssignments);
 router.delete('/assignments/:id', restrictTo('T3_EXECUTIVE', 'ADMIN', 'SUPER_ADMIN'), controller.deleteAssignment);
 

@@ -7596,9 +7596,17 @@ export const MyShiftsPage = () => {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">My Shifts & Teams</h1>
-        <p className="text-gray-500">Your assigned team and event shift allocations</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">My Shifts & Teams</h1>
+          <p className="text-gray-500">Your assigned team and event shift allocations</p>
+        </div>
+        <NavLink
+          to="/my-workforce"
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg shadow-sm transition flex items-center gap-1.5 self-start sm:self-auto"
+        >
+          <Calendar size={14} /> Weekly Schedule & Timesheets →
+        </NavLink>
       </div>
 
       {loading ? (

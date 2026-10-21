@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Calendar, Clock, CheckCircle2, AlertCircle, FileText, Plus, Trash2, X, ChevronLeft, ChevronRight
+  Calendar, Clock, CheckCircle2, AlertCircle, FileText, Plus, Trash2, X, ChevronLeft, ChevronRight,
+  Users, UsersRound
 } from 'lucide-react';
 import api from '../../lib/api';
 import { useAuth } from '../../pages';
@@ -30,6 +31,11 @@ export const MyWorkforcePage = () => {
   const [myAssignments, setMyAssignments] = useState([]);
   const [myTimesheets, setMyTimesheets] = useState([]);
   const [myAttendance, setMyAttendance] = useState([]);
+  const [teams, setTeams] = useState([]);
+  const [selectedTeamId, setSelectedTeamId] = useState('');
+  const [teamAssignments, setTeamAssignments] = useState([]);
+  const [teamMembers, setTeamMembers] = useState([]);
+  const [viewMode, setViewMode] = useState('my'); // 'my' | 'team'
 
   // Timesheet Modal
   const [timesheetModalOpen, setTimesheetModalOpen] = useState(false);
@@ -47,20 +53,36 @@ export const MyWorkforcePage = () => {
 
   const loadData = useCallback(async () => {
     try {
-      const [assignRes, timesheetRes, attendRes] = await Promise.all([
+      const [assignRes, timesheetRes, attendRes, teamsRes] = await Promise.all([
         api.get(`/workforce/assignments/me?startDate=${weekDays[0]}&endDate=${weekDays[6]}`),
         api.get(`/workforce/timesheets/day/me?startDate=${weekDays[0]}&endDate=${weekDays[6]}`),
         api.get(`/attendance/me?days=14`),
+        api.get('/teams/me').catch(() => ({ data: { data: [] } })),
       ]);
       setMyAssignments(assignRes.data?.data || []);
       setMyTimesheets(timesheetRes.data?.data || []);
       setMyAttendance(attendRes.data?.data || []);
+
+      const userTeams = Array.isArray(teamsRes.data?.data) ? teamsRes.data.data : [];
+      setTeams(userTeams);
+      const activeTeamId = selectedTeamId || userTeams[0]?._id;
+      if (activeTeamId) {
+        setSelectedTeamId((prev) => prev || activeTeamId);
+        try {
+          const [teamAssignRes, teamDetailRes] = await Promise.all([
+            api.get(`/workforce/assignments/team?teamId=${activeTeamId}&startDate=${weekDays[0]}&endDate=${weekDays[6]}`).catch(() => ({ data: { data: [] } })),
+            api.get(`/teams/${activeTeamId}`).catch(() => ({ data: { data: {} } })),
+          ]);
+          setTeamAssignments(teamAssignRes.data?.data || []);
+          setTeamMembers(teamDetailRes.data?.data?.members || []);
+        } catch (_) {}
+      }
     } catch (err) {
       setErrorMsg('Failed to load schedule: ' + (err.response?.data?.message || err.message));
     } finally {
       setLoading(false);
     }
-  }, [weekDays[0]]);
+  }, [weekDays[0], selectedTeamId]);
 
   useEffect(() => {
     loadData();
@@ -192,8 +214,152 @@ export const MyWorkforcePage = () => {
         </div>
       )}
 
-      {/* Week Day Schedule Cards (Responsive Stack) */}
-      <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
+      {/* View Switcher: My Shifts vs Team Shifts */}
+      {teams.length > 0 && (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-3 border-2 border-[#1A1A1A] rounded-xl">
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setViewMode('my')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                viewMode === 'my'
+                  ? 'bg-[#1B5299] text-white border-[#1A1A1A] shadow-[2px_2px_0px_0px_#1A1A1A]'
+                  : 'bg-slate-50 text-slate-700 border-transparent hover:bg-slate-100'
+              }`}
+            >
+              My Shifts & Timesheets
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('team')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                viewMode === 'team'
+                  ? 'bg-[#1B5299] text-white border-[#1A1A1A] shadow-[2px_2px_0px_0px_#1A1A1A]'
+                  : 'bg-slate-50 text-slate-700 border-transparent hover:bg-slate-100'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" /> Team Shift Schedule
+            </button>
+          </div>
+
+          {viewMode === 'team' && teams.length > 1 && (
+            <select
+              value={selectedTeamId}
+              onChange={(e) => setSelectedTeamId(e.target.value)}
+              className="px-3 py-1.5 text-xs font-bold font-['Space_Mono',monospace] bg-slate-50 border-2 border-[#1A1A1A] rounded-xl outline-none"
+            >
+              {teams.map((t) => (
+                <option key={t._id} value={t._id}>{t.name}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+
+      {viewMode === 'team' ? (
+        /* Team Shift Schedule Grid */
+        <div className="bg-white border-[2.5px] border-[#1A1A1A] rounded-2xl shadow-[4px_4px_0px_0px_#1A1A1A] overflow-hidden">
+          <div className="p-4 border-b-2 border-[#1A1A1A] bg-slate-50 flex items-center justify-between">
+            <div>
+              <h2 className="font-['Barlow_Condensed',sans-serif] font-black text-xl uppercase tracking-wide text-slate-900">
+                Team Shift Schedule — {teams.find((t) => t._id === selectedTeamId)?.name || 'Team'}
+              </h2>
+              <p className="text-xs text-slate-500 font-['Space_Mono',monospace]">
+                View your team members' scheduled shifts for this week
+              </p>
+            </div>
+            <span className="text-xs font-['Space_Mono',monospace] font-bold px-2 py-1 bg-blue-100 text-blue-800 rounded-lg">
+              {teamMembers.length} Members
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs font-['Space_Mono',monospace] border-collapse">
+              <thead>
+                <tr className="bg-slate-100 border-b-2 border-[#1A1A1A] text-left">
+                  <th className="py-3 px-4 font-black uppercase text-slate-700 border-r-2 border-[#1A1A1A] min-w-[180px]">
+                    Team Member
+                  </th>
+                  {weekDays.map((day) => {
+                    const dateObj = new Date(day + 'T00:00:00');
+                    const isToday = day === new Date().toISOString().split('T')[0];
+                    return (
+                      <th
+                        key={day}
+                        className={`py-2 px-2 font-bold text-center border-r border-slate-200 min-w-[110px] ${
+                          isToday ? 'bg-blue-50/80 text-blue-900' : 'text-slate-600'
+                        }`}
+                      >
+                        <div className="text-[10px] uppercase text-slate-400">
+                          {dateObj.toLocaleDateString('en-US', { weekday: 'short' })}
+                        </div>
+                        <div className="font-black text-xs">{day.slice(8)}</div>
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {teamMembers.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-8 text-center text-slate-400">
+                      No members found for this team.
+                    </td>
+                  </tr>
+                ) : (
+                  teamMembers.map((member) => {
+                    const mId = (member._id || member).toString();
+                    const mName = member.name || 'Member';
+                    const isCurrentUser = mId === user?._id || mId === user?.id;
+
+                    return (
+                      <tr key={mId} className={`hover:bg-slate-50/70 ${isCurrentUser ? 'bg-amber-50/40' : ''}`}>
+                        <td className="py-2.5 px-4 border-r-2 border-[#1A1A1A] bg-white">
+                          <div className="font-bold text-slate-900 truncate flex items-center gap-1.5">
+                            {mName}
+                            {isCurrentUser && (
+                              <span className="text-[9px] px-1 py-0.2 bg-blue-100 text-blue-700 rounded font-bold">You</span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-slate-400">
+                            {member.role?.replace('T1_VOLUNTEER', 'T1').replace('T2_ASSOCIATE', 'T2').replace('T3_EXECUTIVE', 'T3')}
+                          </span>
+                        </td>
+
+                        {weekDays.map((day) => {
+                          const assignment = teamAssignments.find(
+                            (a) => (a.userId?._id || a.userId)?.toString() === mId && a.date === day
+                          );
+
+                          return (
+                            <td key={day} className="py-2 px-2 border-r border-slate-200 align-top text-center">
+                              {assignment ? (
+                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-1.5 space-y-0.5 text-left">
+                                  <div className="font-bold text-blue-900 text-[10px] truncate">
+                                    {assignment.shiftName}
+                                  </div>
+                                  <div className="text-[9px] text-blue-600 flex items-center gap-1">
+                                    <Clock className="w-2.5 h-2.5" />
+                                    <span>{assignment.startTime}–{assignment.endTime}</span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-slate-300 text-[10px]">—</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        /* Week Day Schedule Cards (Responsive Stack) */
+        <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
         {weekDays.map((day) => {
           const dateObj = new Date(day + 'T00:00:00');
           const weekdayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
@@ -288,6 +454,7 @@ export const MyWorkforcePage = () => {
           );
         })}
       </div>
+      )}
 
       {/* MODAL: Submit Day Timesheet */}
       {timesheetModalOpen && (

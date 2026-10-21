@@ -215,35 +215,62 @@ class ApplicationService {
     // On approval for leave/half_day -> auto mark attendance!
     if (normalizedStatus === 'approved' && ['leave', 'half_day'].includes(app.requestType)) {
       const Attendance = require('../attendance/attendance.model');
+      const DailyAttendance = require('../../models/DailyAttendance.model');
       const targetDate = app.targetDate || new Date().toISOString().split('T')[0];
       const attStatus = app.requestType === 'half_day' ? 'half_day' : 'on_leave';
+      const dailyStatus = app.requestType === 'half_day' ? 'HALF_DAY' : 'ON_LEAVE';
       const shiftLabel = app.requestType === 'half_day' ? 'Half Day' : 'Leave';
       const notes = app.reason
         ? `Approved ${shiftLabel}: ${app.reason}`
         : `Approved ${shiftLabel} by ${reviewerName}`;
 
       try {
-        await Attendance.findOneAndUpdate(
-          { studentId: app.studentId, teamId: app.teamId, date: targetDate },
-          {
-            studentId: app.studentId,
-            studentName: app.studentName,
-            studentEmail: app.studentEmail,
-            teamId: app.teamId,
-            teamName: app.teamName || '',
-            date: targetDate,
-            shiftLabel,
-            status: attStatus,
-            method: 'manual',
-            markedBy: requesterSub,
-            markedByName: reviewerName,
-            notes,
-            durationMinutes: app.requestType === 'half_day' ? 240 : 0,
-            checkInTime: null,
-            checkOutTime: null,
-          },
-          { new: true, upsert: true, setDefaultsOnInsert: true }
-        );
+        await Promise.all([
+          Attendance.findOneAndUpdate(
+            { studentId: app.studentId, teamId: app.teamId, date: targetDate },
+            {
+              studentId: app.studentId,
+              studentName: app.studentName,
+              studentEmail: app.studentEmail,
+              teamId: app.teamId,
+              teamName: app.teamName || '',
+              date: targetDate,
+              shiftLabel,
+              status: attStatus,
+              method: 'manual',
+              markedBy: requesterSub,
+              markedByName: reviewerName,
+              notes,
+              durationMinutes: app.requestType === 'half_day' ? 240 : 0,
+              checkInTime: null,
+              checkOutTime: null,
+            },
+            { new: true, upsert: true, setDefaultsOnInsert: true }
+          ),
+          DailyAttendance.findOneAndUpdate(
+            { userId: app.studentId, date: targetDate },
+            {
+              $set: {
+                userId: app.studentId,
+                userName: app.studentName,
+                userEmail: app.studentEmail,
+                userRole: app.role || 'T1_VOLUNTEER',
+                teamId: app.teamId,
+                date: targetDate,
+                status: dailyStatus,
+                originalStatus: dailyStatus,
+                markedMethod: 'manual_lead',
+                manualEntry: {
+                  markedBy: requesterSub,
+                  markedByName: reviewerName,
+                  markedAt: new Date(),
+                  reason: notes,
+                },
+              },
+            },
+            { new: true, upsert: true, setDefaultsOnInsert: true }
+          ),
+        ]);
       } catch (attErr) {
         console.error('Failed to auto-update attendance on approval:', attErr.message);
       }
@@ -253,13 +280,21 @@ class ApplicationService {
     if (['rejected', 'pending'].includes(normalizedStatus) && ['leave', 'half_day'].includes(app.requestType)) {
       try {
         const Attendance = require('../attendance/attendance.model');
+        const DailyAttendance = require('../../models/DailyAttendance.model');
         const targetDate = app.targetDate || new Date().toISOString().split('T')[0];
-        await Attendance.deleteOne({
-          studentId: app.studentId,
-          teamId: app.teamId,
-          date: targetDate,
-          status: { $in: ['on_leave', 'half_day'] },
-        });
+        await Promise.all([
+          Attendance.deleteOne({
+            studentId: app.studentId,
+            teamId: app.teamId,
+            date: targetDate,
+            status: { $in: ['on_leave', 'half_day'] },
+          }),
+          DailyAttendance.deleteOne({
+            userId: app.studentId,
+            date: targetDate,
+            status: { $in: ['ON_LEAVE', 'HALF_DAY'] },
+          }),
+        ]);
       } catch (delErr) {
         console.warn('Failed to clean up attendance on leave cancellation:', delErr.message);
       }

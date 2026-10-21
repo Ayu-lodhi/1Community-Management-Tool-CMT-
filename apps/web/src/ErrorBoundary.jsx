@@ -26,12 +26,24 @@ export class ErrorBoundary extends React.Component {
             <p className="text-sm text-slate-600 mb-4">
               {this.state.error?.message || 'An unexpected rendering error occurred.'}
             </p>
-            <div className="flex gap-3 justify-center">
+            <div className="flex flex-wrap gap-2 justify-center">
               <button
-                onClick={() => window.location.reload()}
+                onClick={() => {
+                  this.setState({ hasError: false, error: null });
+                  window.location.href = window.location.href;
+                }}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-lg transition-colors cursor-pointer"
               >
                 Reload Page
+              </button>
+              <button
+                onClick={() => {
+                  this.setState({ hasError: false, error: null });
+                  window.location.href = '/';
+                }}
+                className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold text-sm rounded-lg transition-colors cursor-pointer border border-indigo-200"
+              >
+                Go to Dashboard
               </button>
               <button
                 onClick={() => {
