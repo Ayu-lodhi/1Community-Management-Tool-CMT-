@@ -52,11 +52,16 @@ Module._load = function (request, parent, isMain) {
             return {
               lean() {
                 const targetIds = (filter.user?.$in || []).map(String);
-                const monthPrefix = filter.date?.$regex?.replace('^', '') || '';
                 const matched = sampleAttendance.filter((r) => {
                   const uId = String(r.user || r.studentId);
                   const inTarget = targetIds.includes(uId);
-                  const inMonth = r.date.startsWith(monthPrefix);
+                  let inMonth = true;
+                  if (filter.date?.$gte && filter.date?.$lte) {
+                    inMonth = r.date >= filter.date.$gte && r.date <= filter.date.$lte;
+                  } else if (filter.date?.$regex) {
+                    const monthPrefix = filter.date.$regex.replace('^', '');
+                    inMonth = r.date.startsWith(monthPrefix);
+                  }
                   const inStatus = filter.status?.$in ? filter.status.$in.includes(r.status) : true;
                   return inTarget && inMonth && inStatus;
                 });
@@ -286,6 +291,29 @@ test('Attendance Exceptions: counts late, absent, on_leave; rejects T1/T2; no pa
       query: { month: '2026-03' },
     });
     assert.equal(resSuper.statusCode, 200);
+  });
+
+  await t.test('Date range query isolates month boundary and excludes adjacent months', async () => {
+    const resApr = await runRoute('GET', '/attendance-exceptions', {
+      user: { sub: LEAD_ID, role: 'T3_EXECUTIVE' },
+      query: { month: '2026-04' },
+    });
+    assert.equal(resApr.statusCode, 200);
+    const aliceApr = resApr.body.data.find((e) => e.employeeId === MEMBER_1);
+    assert.ok(aliceApr);
+    assert.equal(aliceApr.absentCount, 1);
+    assert.equal(aliceApr.lateCount, 0);
+
+    const resMay = await runRoute('GET', '/attendance-exceptions', {
+      user: { sub: LEAD_ID, role: 'T3_EXECUTIVE' },
+      query: { month: '2026-05' },
+    });
+    assert.equal(resMay.statusCode, 200);
+    const aliceMay = resMay.body.data.find((e) => e.employeeId === MEMBER_1);
+    assert.ok(aliceMay);
+    assert.equal(aliceMay.lateCount, 0);
+    assert.equal(aliceMay.absentCount, 0);
+    assert.equal(aliceMay.onLeaveCount, 0);
   });
 
   // Restore protect

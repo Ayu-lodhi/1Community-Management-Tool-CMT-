@@ -249,7 +249,7 @@ async function exportExceptionsCsv(req, res, next) {
 
     const records = await Attendance.find({
       user: { $in: targetUserIds },
-      date: { $regex: `^${month}` },
+      date: { $gte: `${month}-01`, $lte: `${month}-31` },
       status: { $in: ['late', 'absent', 'on_leave'] },
     }).select('user studentId status date').lean();
 

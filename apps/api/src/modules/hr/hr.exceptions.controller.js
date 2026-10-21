@@ -86,7 +86,7 @@ async function getAttendanceExceptions(req, res, next) {
     // Both 'user' and 'studentId' reference User._id; we check user in targetUserIds.
     const records = await Attendance.find({
       user: { $in: targetUserIds },
-      date: { $regex: `^${month}` },
+      date: { $gte: `${month}-01`, $lte: `${month}-31` },
       status: { $in: ['late', 'absent', 'on_leave'] },
     }).select('user studentId status date').lean();
 
