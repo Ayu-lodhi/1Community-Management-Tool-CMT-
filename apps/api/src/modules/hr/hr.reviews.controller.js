@@ -1,6 +1,8 @@
 'use strict';
 
 const HrReview = require('./hr.reviews.model');
+const HrProfile = require('./hr.profile.model');
+const Attendance = require('../attendance/attendance.model');
 const User = require('../admin/admin.model');
 const Team = require('../teams/teams.model');
 const { isLeadOfPerson } = require('./hr.permissions');
@@ -177,8 +179,83 @@ async function getEmployeeReviewHistory(req, res, next) {
   }
 }
 
+// ── STUDENT OWN SCORECARD (T1, T2, and all authenticated members) ──────────
+async function getMyScorecard(req, res, next) {
+  try {
+    const callerIdStr = (req.user?.sub || req.user?._id || req.user?.id)?.toString();
+    if (!callerIdStr) {
+      return res.status(401).json({ success: false, message: 'Unauthenticated' });
+    }
+
+    // 1. Fetch member's reviews
+    const reviews = await HrReview.find({ employeeId: callerIdStr })
+      .sort({ period: -1 })
+      .lean();
+
+    // 2. Fetch member's attendance summary
+    const attendanceRecords = await Attendance.find({
+      $or: [{ user: callerIdStr }, { studentId: callerIdStr }],
+    }).select('date status method').lean();
+
+    let presentCount = 0;
+    let lateCount = 0;
+    let absentCount = 0;
+    let onLeaveCount = 0;
+    let halfDayCount = 0;
+
+    for (const rec of attendanceRecords) {
+      if (rec.status === 'present') presentCount++;
+      else if (rec.status === 'late') lateCount++;
+      else if (rec.status === 'absent') absentCount++;
+      else if (rec.status === 'on_leave') onLeaveCount++;
+      else if (rec.status === 'half_day') halfDayCount++;
+    }
+
+    const totalRecords = attendanceRecords.length;
+    const attendedSessions = presentCount + lateCount + halfDayCount;
+    const attendanceRate = totalRecords > 0
+      ? Math.round((attendedSessions / totalRecords) * 10000) / 100
+      : 100;
+
+    // 3. Fetch member's HR profile (department/post/category/joiningDate)
+    const profile = await HrProfile.findOne({ userId: callerIdStr })
+      .populate('department', 'name description')
+      .populate('post', 'name description')
+      .populate('category', 'name description')
+      .lean();
+
+    res.json({
+      success: true,
+      data: {
+        userId: callerIdStr,
+        userName: req.user?.name || '',
+        role: req.user?.role || '',
+        profile: {
+          department: profile?.department?.name || null,
+          post: profile?.post?.name || null,
+          category: profile?.category?.name || null,
+          joiningDate: profile?.joiningDate || null,
+        },
+        attendanceSummary: {
+          totalRecords,
+          presentCount,
+          lateCount,
+          absentCount,
+          onLeaveCount,
+          halfDayCount,
+          attendanceRate,
+        },
+        reviews,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   submitReview,
   listReviews,
   getEmployeeReviewHistory,
+  getMyScorecard,
 };

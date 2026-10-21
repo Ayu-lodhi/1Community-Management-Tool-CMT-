@@ -20,6 +20,7 @@ import { T3WorkforcePage } from './pages/workforce/T3WorkforcePage';
 import { MyWorkforcePage } from './pages/workforce/MyWorkforcePage';
 import { T3ApprovalsPage } from './pages/workforce/T3ApprovalsPage';
 import { HrPage } from './pages/hr/HrPage';
+import { MyScorecardPage } from './pages/hr/MyScorecardPage';
 
 const RootRedirect = () => {
   const { user, initializing } = useAuth();
@@ -90,6 +91,7 @@ function App() {
             <Route path="/t1/reviews" element={<ProtectedRoute roles={['T1_VOLUNTEER']}><MyReviewsPage /></ProtectedRoute>} />
 
             {/* Shared & Profile */}
+            <Route path="/scorecard" element={<ProtectedRoute><MyScorecardPage /></ProtectedRoute>} />
             <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
             <Route path="/announcements" element={<ProtectedRoute><AnnouncementsPage /></ProtectedRoute>} />
             <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />

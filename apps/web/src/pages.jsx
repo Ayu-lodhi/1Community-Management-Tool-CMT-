@@ -405,6 +405,7 @@ const MENUS = {
     {
       section: 'MY WORKSPACE', items: [
         { icon: LayoutDashboard, label: 'Dashboard', to: '/t2' },
+        { icon: Award, label: 'My Scorecard', to: '/scorecard' },
         { icon: Calendar, label: 'My Schedule & Timesheet', to: '/my-workforce' },
         { icon: Calendar, label: 'Browse Events', to: '/t2/events' },
         { icon: FileCheck, label: 'Approval Requests', to: '/t2/applications' },
@@ -430,6 +431,7 @@ const MENUS = {
     {
       section: 'MY WORKSPACE', items: [
         { icon: LayoutDashboard, label: 'Dashboard', to: '/t1' },
+        { icon: Award, label: 'My Scorecard', to: '/scorecard' },
         { icon: Calendar, label: 'My Schedule & Timesheet', to: '/my-workforce' },
         { icon: Calendar, label: 'Browse Events', to: '/t1/events' },
         { icon: FileCheck, label: 'Approval Requests', to: '/t1/applications' },
