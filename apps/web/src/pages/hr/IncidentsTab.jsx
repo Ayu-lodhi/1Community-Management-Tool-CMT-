@@ -3,7 +3,7 @@ import {
   AlertTriangle, Plus, CheckCircle, Trash2, Download,
   RefreshCw, AlertCircle, CheckCircle2, FileText, X
 } from 'lucide-react';
-import { useAuth } from '../../pages';
+import { useAuth } from '../../context/AuthContext';
 import api from '../../lib/api';
 
 export const IncidentsTab = ({ canExport = false }) => {

@@ -36,7 +36,8 @@ router.get('/sessions', async (req, res) => {
   try {
     const users = await User.find({ activeSessionId: { $ne: null } })
       .select('name email role tier lastActivity activeSessionId createdAt')
-      .sort({ lastActivity: -1 });
+      .sort({ lastActivity: -1 })
+      .lean();
     res.json({ success: true, data: users });
   } catch (err) {
     console.error('SuperAdmin API Error:', err.message);

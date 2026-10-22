@@ -2,7 +2,8 @@ const adminService = require('./admin.service');
 
 exports.getUsers = async (req, res) => {
   try {
-    const users = await adminService.getAllUsers();
+    const { role, limit, page } = req.query;
+    const users = await adminService.getAllUsers({ role, limit, page });
     res.status(200).json({ success: true, data: users });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

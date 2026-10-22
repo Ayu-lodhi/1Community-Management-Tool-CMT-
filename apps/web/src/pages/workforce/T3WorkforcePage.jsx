@@ -4,7 +4,7 @@ import {
   CheckCircle2, Download, AlertCircle, RefreshCw, Check, FileText
 } from 'lucide-react';
 import api from '../../lib/api';
-import { useAuth } from '../../pages';
+import { useAuth } from '../../context/AuthContext';
 import { AttendanceRegisterView } from './AttendanceRegisterView';
 
 export const T3WorkforcePage = () => {
@@ -60,35 +60,16 @@ export const T3WorkforcePage = () => {
   const [savingCustomTask, setSavingCustomTask] = useState(false);
   const [customTaskError, setCustomTaskError] = useState('');
 
-  // 1. Fetch available teams
-  useEffect(() => {
-    const fetchTeams = async () => {
-      try {
-        const endpoint = isAdmin ? '/teams' : '/teams/me';
-        const res = await api.get(endpoint);
-        const list = Array.isArray(res.data?.data) ? res.data.data : [];
-        setTeams(list);
-        if (list.length > 0) {
-          setSelectedTeamId((prev) => prev || list[0]._id);
-        }
-      } catch (err) {
-        setErrorMsg('Failed to load teams: ' + (err.response?.data?.message || err.message));
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchTeams();
-  }, [isAdmin]);
-
   // 2. Fetch team members, templates, tasks, and assignments
-  const loadTeamData = useCallback(async () => {
-    if (!selectedTeamId) return;
+  const loadTeamData = useCallback(async (targetId) => {
+    const activeTeamId = targetId || selectedTeamId;
+    if (!activeTeamId) return;
     try {
       const [templatesRes, tasksRes, assignRes, teamRes] = await Promise.all([
-        api.get(`/workforce/shifts/templates?teamId=${selectedTeamId}`),
-        api.get(`/workforce/tasks?teamId=${selectedTeamId}`),
-        api.get(`/workforce/assignments/team?teamId=${selectedTeamId}&startDate=${weekDays[0]}&endDate=${weekDays[6]}`),
-        api.get(`/teams/${selectedTeamId}`),
+        api.get(`/workforce/shifts/templates?teamId=${activeTeamId}`),
+        api.get(`/workforce/tasks?teamId=${activeTeamId}`),
+        api.get(`/workforce/assignments/team?teamId=${activeTeamId}&startDate=${weekDays[0]}&endDate=${weekDays[6]}`),
+        api.get(`/teams/${activeTeamId}`),
       ]);
 
       setShiftTemplates(templatesRes.data?.data || []);
@@ -101,7 +82,34 @@ export const T3WorkforcePage = () => {
     } catch (err) {
       console.error('Failed to load team workforce data:', err);
     }
-  }, [selectedTeamId, weekDays[0]]);
+  }, [selectedTeamId, weekDays]);
+
+  // 1. Fetch available teams
+  useEffect(() => {
+    let isMounted = true;
+    const fetchTeams = async () => {
+      try {
+        const endpoint = isAdmin ? '/teams' : '/teams/me';
+        const res = await api.get(endpoint);
+        const list = Array.isArray(res.data?.data) ? res.data.data : [];
+        if (!isMounted) return;
+        setTeams(list);
+        if (list.length > 0) {
+          const initialId = list[0]._id;
+          setSelectedTeamId((prev) => prev || initialId);
+          if (activeView === 'calendar') {
+            void loadTeamData(initialId);
+          }
+        }
+      } catch (err) {
+        if (isMounted) setErrorMsg('Failed to load teams: ' + (err.response?.data?.message || err.message));
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+    fetchTeams();
+    return () => { isMounted = false; };
+  }, [isAdmin, activeView, loadTeamData]);
 
   useEffect(() => {
     if (activeView === 'calendar') {

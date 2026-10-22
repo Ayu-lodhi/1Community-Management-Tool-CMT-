@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Award, Plus, Download, RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { useAuth } from '../../pages';
+import { useAuth } from '../../context/AuthContext';
 import api from '../../lib/api';
 
 export const ReviewsTab = ({ canExport = false }) => {

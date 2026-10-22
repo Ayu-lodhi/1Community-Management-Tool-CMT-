@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Users, Award, AlertTriangle, FileText, Settings, ShieldAlert
 } from 'lucide-react';
-import { useAuth } from '../../pages';
+import { useAuth } from '../../context/AuthContext';
 import { MastersTab } from './MastersTab';
 import { ProfilesTab } from './ProfilesTab';
 import { IncidentsTab } from './IncidentsTab';

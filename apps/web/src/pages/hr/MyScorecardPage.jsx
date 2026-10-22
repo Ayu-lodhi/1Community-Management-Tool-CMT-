@@ -3,7 +3,7 @@ import {
   Award, Calendar, CheckCircle2, AlertCircle, Clock,
   RefreshCw, User, Briefcase, FileText, ChevronRight
 } from 'lucide-react';
-import { useAuth } from '../../pages';
+import { useAuth } from '../../context/AuthContext';
 import api from '../../lib/api';
 
 export const MyScorecardPage = () => {

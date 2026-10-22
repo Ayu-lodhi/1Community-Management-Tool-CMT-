@@ -4,7 +4,7 @@ import {
   Users, UsersRound
 } from 'lucide-react';
 import api from '../../lib/api';
-import { useAuth } from '../../pages';
+import { useAuth } from '../../context/AuthContext';
 
 export const MyWorkforcePage = () => {
   const { user } = useAuth();

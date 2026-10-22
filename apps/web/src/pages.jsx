@@ -15,286 +15,16 @@ import {
   Menu
 } from 'lucide-react';
 import api from './lib/api';
-import { io } from 'socket.io-client';
-import {
-  PieChart, Pie, BarChart, Bar, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  AreaChart, Area,
-} from 'recharts';
 
-const BACKEND_URL = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? '' : 'http://localhost:5000');
+const BACKEND_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? '' : 'http://localhost:5000');
 const API_BASE = `${BACKEND_URL}/api/v1`;
 
-// ====================================================================
-// AUTH CONTEXT
-// ====================================================================
-const AuthContext = createContext(null);
-export const useAuth = () => useContext(AuthContext);
-
-// ====================================================================
-// SOCKET CONTEXT
-// ====================================================================
-const SocketContext = createContext(null);
-export const useSocket = () => useContext(SocketContext);
-
-export const SocketProvider = ({ children }) => {
-  const { user } = useAuth();
-  const [socket, setSocket] = useState(null);
-
-  useEffect(() => {
-    if (!user) {
-      if (socket) {
-        socket.disconnect();
-        setSocket(null);
-      }
-      return;
-    }
-
-    const token = typeof window !== 'undefined' ? (sessionStorage.getItem('tbi_token') || localStorage.getItem('tbi_token')) : null;
-    if (!token) return;
-
-    const newSocket = io(BACKEND_URL || (typeof window !== 'undefined' ? window.location.origin : ''), {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionAttempts: 10,
-    });
-
-    newSocket.on('connect', () => {
-      console.log('Real-time connected');
-    });
-
-    newSocket.on('connect_error', (err) => {
-      console.warn('Socket connection error:', err.message);
-    });
-
-    setSocket(newSocket);
-
-    return () => {
-      newSocket.disconnect();
-    };
-  }, [user]);
-
-  return <SocketContext.Provider value={socket}>{children}</SocketContext.Provider>;
-};
-
-export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [initializing, setInitializing] = useState(true);
-
-  // Restore session from sessionStorage on mount (tab-isolated)
-  useEffect(() => {
-    try {
-      // If URL explicitly requests a fresh session, clear this tab's auth
-      if (typeof window !== 'undefined') {
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('new_session') === 'true') {
-          sessionStorage.removeItem('tbi_user');
-          sessionStorage.removeItem('tbi_token');
-          localStorage.removeItem('tbi_user');
-          localStorage.removeItem('tbi_token');
-          setInitializing(false);
-          return;
-        }
-      }
-
-      let storedUser = typeof window !== 'undefined' ? sessionStorage.getItem('tbi_user') : null;
-      let storedToken = typeof window !== 'undefined' ? sessionStorage.getItem('tbi_token') : null;
-
-      // Backward compatibility: migrate legacy single-session from localStorage to current tab's sessionStorage
-      if (!storedUser || !storedToken) {
-        const legacyUser = typeof window !== 'undefined' ? localStorage.getItem('tbi_user') : null;
-        const legacyToken = typeof window !== 'undefined' ? localStorage.getItem('tbi_token') : null;
-        if (legacyUser && legacyToken) {
-          storedUser = legacyUser;
-          storedToken = legacyToken;
-          sessionStorage.setItem('tbi_user', legacyUser);
-          sessionStorage.setItem('tbi_token', legacyToken);
-        }
-        // Remove from localStorage so subsequent new tabs start fresh with independent sessions
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('tbi_user');
-          localStorage.removeItem('tbi_token');
-        }
-      }
-
-      if (storedUser && storedToken) {
-        setUser(JSON.parse(storedUser));
-      }
-    } catch (err) {
-      console.error('Failed to restore session:', err);
-      if (typeof window !== 'undefined') {
-        sessionStorage.removeItem('tbi_user');
-        sessionStorage.removeItem('tbi_token');
-        localStorage.removeItem('tbi_user');
-        localStorage.removeItem('tbi_token');
-      }
-    } finally {
-      setInitializing(false);
-    }
-  }, []);
-
-  const login = (u, t) => {
-    setUser(u);
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('tbi_user', JSON.stringify(u));
-      sessionStorage.setItem('tbi_token', t);
-      // Clean localStorage so new tabs are not automatically forced into this account
-      localStorage.removeItem('tbi_user');
-      localStorage.removeItem('tbi_token');
-    }
-  };
-
-  const logout = useCallback(async () => {
-    try {
-      const token = typeof window !== 'undefined' ? (sessionStorage.getItem('tbi_token') || localStorage.getItem('tbi_token')) : null;
-      if (token) {
-        fetch(`${API_BASE}/auth/logout`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-        }).catch(() => {});
-      }
-    } catch {}
-    setUser(null);
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('tbi_user');
-      sessionStorage.removeItem('tbi_token');
-      localStorage.removeItem('tbi_user');
-      localStorage.removeItem('tbi_token');
-    }
-  }, []);
-
-  const updateUser = (updatedFields) => {
-    setUser((prev) => {
-      const next = { ...prev, ...updatedFields };
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem('tbi_user', JSON.stringify(next));
-      }
-      return next;
-    });
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, login, logout, initializing, updateUser }}>
-      {children}
-      {user && <IdleTimeoutWatcher logout={logout} />}
-    </AuthContext.Provider>
-  );
-};
-
-// ====================================================================
-// IDLE TIMEOUT WATCHER — Inactivity auto-logout
-// "if user is idle and not making any requests, auto log out from system"
-// ====================================================================
-const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes of inactivity
-const WARNING_WINDOW_MS = 60 * 1000;          // 60 seconds warning countdown
-
-export const IdleTimeoutWatcher = ({ logout }) => {
-  const [showWarning, setShowWarning] = useState(false);
-  const [secondsRemaining, setSecondsRemaining] = useState(60);
-  const lastActivityRef = useRef(Date.now());
-
-  const resetActivity = useCallback(() => {
-    lastActivityRef.current = Date.now();
-    setShowWarning(false);
-  }, []);
-
-  useEffect(() => {
-    const handleActivity = () => {
-      lastActivityRef.current = Date.now();
-    };
-
-    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click', 'wheel'];
-    events.forEach((ev) => window.addEventListener(ev, handleActivity, { passive: true }));
-    window.addEventListener('app:activity', handleActivity);
-
-    const interval = setInterval(() => {
-      const timeoutLimit =
-        (typeof window !== 'undefined' && window.__IDLE_TIMEOUT_MS) || DEFAULT_IDLE_TIMEOUT_MS;
-      const warningThreshold = Math.min(WARNING_WINDOW_MS, Math.floor(timeoutLimit / 2));
-      const idleTime = Date.now() - lastActivityRef.current;
-      const timeLeft = timeoutLimit - idleTime;
-
-      if (timeLeft <= 0) {
-        clearInterval(interval);
-        setShowWarning(false);
-        if (logout) logout();
-        if (typeof window !== 'undefined') {
-          sessionStorage.removeItem('tbi_user');
-          sessionStorage.removeItem('tbi_token');
-          window.location.href = '/login?reason=inactivity';
-        }
-      } else if (timeLeft <= warningThreshold) {
-        setShowWarning(true);
-        setSecondsRemaining(Math.max(1, Math.ceil(timeLeft / 1000)));
-      } else {
-        setShowWarning(false);
-      }
-    }, 1000);
-
-    return () => {
-      events.forEach((ev) => window.removeEventListener(ev, handleActivity));
-      window.removeEventListener('app:activity', handleActivity);
-      clearInterval(interval);
-    };
-  }, [logout]);
-
-  if (!showWarning) return null;
-
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
-      <div className="max-w-sm w-full bg-white rounded-2xl shadow-2xl border-2 border-amber-400 p-6 text-center animate-fade-in">
-        <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto mb-3 text-amber-600 shadow-inner">
-          <Clock className="w-7 h-7 animate-pulse" />
-        </div>
-        <h3 className="text-lg font-bold text-slate-900">Session Inactivity Warning</h3>
-        <p className="text-xs text-slate-500 mt-1 mb-4 leading-relaxed">
-          You have been idle for a while. To protect your account, your session will automatically end in:
-        </p>
-        <div className="inline-flex items-center justify-center px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl mb-5">
-          <span className="text-2xl font-mono font-black text-amber-700">
-            {secondsRemaining}s
-          </span>
-        </div>
-        <div className="flex gap-2 justify-center">
-          <button
-            type="button"
-            onClick={() => {
-              if (logout) logout();
-              window.location.href = '/login?reason=manual';
-            }}
-            className="px-4 py-2.5 rounded-xl border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-100 transition cursor-pointer"
-          >
-            Log Out Now
-          </button>
-          <button
-            type="button"
-            onClick={resetActivity}
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-sm cursor-pointer"
-          >
-            Stay Logged In
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-
-// ====================================================================
-// ROLES
-// ====================================================================
-export const ROLES = {
-  SUPER_ADMIN: { label: 'Super Admin', code: 'SA', color: '#DC2626', sidebarBg: '#0B1120', route: '/super-admin' },
-  ADMIN: { label: 'Admin', code: 'AD', color: '#0B5CAD', sidebarBg: '#0B1120', route: '/admin' },
-  T3_EXECUTIVE: { label: 'T3 Executive', code: 'T3', color: '#2563EB', sidebarBg: '#0B1120', route: '/t3' },
-  T2_ASSOCIATE: { label: 'T2 Associate', code: 'T2', color: '#0284C7', sidebarBg: '#0B1120', route: '/t2' },
-  T1_VOLUNTEER: { label: 'T1 Volunteer', code: 'T1', color: '#DC2626', sidebarBg: '#0B1120', route: '/t1' },
-};
+export {
+  AuthContext, useAuth,
+  SocketContext, useSocket, SocketProvider,
+  AuthProvider, IdleTimeoutWatcher, ROLES
+} from './context/AuthContext';
+import { useAuth, useSocket, ROLES } from './context/AuthContext';
 
 // ====================================================================
 // SIDEBAR MENUS
@@ -1379,74 +1109,14 @@ export const Layout = ({ children }) => {
   );
 };
 
-// ====================================================================
-// SHARED
-// ====================================================================
-export const Kpi = ({ label, value, change }) => (
-  <div className="bg-white p-3.5 sm:p-5 rounded-xl border border-gray-200 hover:shadow-md transition-shadow min-w-0">
-    <p className="text-xs sm:text-sm text-gray-500 truncate">{label}</p>
-    <p className="text-xl sm:text-2xl md:text-3xl font-bold mt-1 sm:mt-2 truncate text-gray-900">{value}</p>
-    {change && <p className="text-[10px] sm:text-xs text-green-500 mt-1">+{change}</p>}
-  </div>
-);
-export const KPI = Kpi;
-
-// ====================================================================
-// ANNOUNCEMENT BANNER — Shows on dashboards when there are new announcements
-// ====================================================================
-export const AnnouncementBanner = () => {
-  const navigate = useNavigate();
-  const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    const fetchCount = async () => {
-      try {
-        const res = await api.get('/announcements');
-        const recent = (res.data.data || []).filter((a) => {
-          const created = new Date(a.createdAt).getTime();
-          const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-          return created > weekAgo;
-        });
-        setCount(recent.length);
-      } catch (err) {
-        // Silent
-      }
-    };
-    void fetchCount();
-  }, []);
-
-  if (count === 0) return null;
-
-  return (
-    <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl p-4 flex items-center justify-between text-white">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
-          <Bell className="w-5 h-5" />
-        </div>
-        <div>
-          <p className="font-semibold text-sm">
-            {count} new announcement{count > 1 ? 's' : ''} this week
-          </p>
-          <p className="text-xs opacity-90">Check what's happening on the platform</p>
-        </div>
-      </div>
-      <button
-        onClick={() => navigate('/announcements')}
-        className="px-4 py-2 bg-white text-indigo-600 rounded-lg font-medium text-sm hover:bg-indigo-50 whitespace-nowrap"
-      >
-        View All
-      </button>
-    </div>
-  );
-};
-
-export const Placeholder = ({ title }) => (
-  <div className="flex flex-col items-center justify-center h-96 text-center">
-    <Construction className="w-16 h-16 text-gray-300 mb-4" />
-    <h2 className="text-2xl font-bold mb-2">{title}</h2>
-    <p className="text-gray-500">This page is under construction</p>
-  </div>
-);
+export {
+  Kpi, KPI, AnnouncementBanner, Placeholder,
+  Skeleton, SkeletonCard, SkeletonTable, SkeletonCardGrid
+} from './components/common/CommonUI';
+import {
+  Kpi, KPI, AnnouncementBanner, Placeholder,
+  Skeleton, SkeletonCard, SkeletonTable, SkeletonCardGrid
+} from './components/common/CommonUI';
 
 export const ProtectedRoute = ({ children, roles }) => {
   const { user, initializing } = useAuth();
@@ -1479,365 +1149,6 @@ export const ProtectedRoute = ({ children, roles }) => {
 // ====================================================================
 // DASHBOARDS
 // ====================================================================
-export const AdminDashboard = () => {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  const [stats, setStats] = useState(null);
-  const [tiers, setTiers] = useState(null);
-  const [trend, setTrend] = useState([]);
-  const [attendance, setAttendance] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const [statsRes, tiersRes, trendRes, attendRes] = await Promise.all([
-          api.get('/stats/admin'),
-          api.get('/stats/users-by-tier'),
-          api.get('/stats/applications-trend'),
-          api.get('/stats/attendance'),
-        ]);
-        setStats(statsRes.data.data);
-        setTiers(tiersRes.data.data);
-        setTrend(trendRes.data.data);
-        setAttendance(attendRes.data.data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <Skeleton className="h-72 rounded-xl" />
-          <Skeleton className="h-72 rounded-xl" />
-        </div>
-      </div>
-    );
-  }
-
-  const tierPieData = tiers ? [
-    { name: 'T1 Volunteers', value: tiers.T1 || 0, color: '#059669', fill: '#059669' },
-    { name: 'T2 Associates', value: tiers.T2 || 0, color: '#0284C7', fill: '#0284C7' },
-    { name: 'T3 Executives', value: tiers.T3 || 0, color: '#7C3AED', fill: '#7C3AED' },
-    { name: 'Admins', value: (tiers.Admin || 0) + (tiers.SuperAdmin || 0), color: '#DC2626', fill: '#DC2626' },
-  ].filter((d) => d.value > 0) : [];
-
-  return (
-    <div className="space-y-6">
-      <AnnouncementBanner />
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Good morning, {user?.name ? user.name.split(' ')[0] : 'Admin'}</h1>
-          <p className="text-gray-500">Here's what's happening today.</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => navigate('/admin/users/new')}
-            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
-          >
-            <UserPlus size={14} /> Add User
-          </button>
-          <button
-            onClick={() => navigate('/admin/users/bulk')}
-            className="px-3.5 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
-          >
-            <Upload size={14} /> Bulk Import
-          </button>
-          <button
-            onClick={() => navigate('/t3/workforce')}
-            className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
-          >
-            <Calendar size={14} /> Workforce Shifts
-          </button>
-          <button
-            onClick={() => navigate('/t3/approvals')}
-            className="px-3.5 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
-          >
-            <CheckCircle size={14} /> Approvals
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <Kpi label="Total Users" value={stats?.totalUsers ?? 0} />
-        <Kpi label="Active Events" value={stats?.activeEvents ?? 0} />
-        <Kpi label="Approval Rate" value={`${stats?.approvalRate ?? 0}%`} />
-        <Kpi label="Teams" value={stats?.totalTeams ?? 0} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 min-w-0 overflow-hidden">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <Users className="w-5 h-5 text-gray-500" /> Users by Tier
-          </h3>
-          {tierPieData.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">
-              No users yet
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
-                <Pie
-                  data={tierPieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={3}
-                  dataKey="value"
-                  label={({ name, value }) => `${name}: ${value}`}
-                  labelLine={false}
-                />
-
-
-
-
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 min-w-0 overflow-hidden">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-gray-500" /> Applications (Last 7 Days)
-          </h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={trend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="day" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-              <Line type="monotone" dataKey="count" stroke="#0EA5E9" strokeWidth={3} dot={{ r: 5, fill: '#0EA5E9' }} activeDot={{ r: 7 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-gray-200">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <CheckCircle className="w-5 h-5 text-gray-500" /> Attendance Today
-          </h3>
-          {!attendance || attendance.total === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">
-              No check-ins today
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart
-                data={[
-                  { status: 'Present', count: attendance.present, fill: '#10B981' },
-                  { status: 'Late', count: attendance.late, fill: '#F59E0B' },
-                  { status: 'Absent', count: attendance.absent, fill: '#EF4444' },
-                ]}
-                margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="status" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-                <Bar dataKey="count" radius={[8, 8, 0, 0]} />
-
-
-
-
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <FileText className="w-5 h-5 text-gray-500" /> Application Status
-          </h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart
-              data={[
-                { status: 'Pending', count: stats.pendingApplications },
-                { status: 'Approved', count: stats.approvedApplications },
-                { status: 'Rejected', count: stats.rejectedApplications },
-              ]}
-              layout="vertical"
-              margin={{ top: 10, right: 20, left: 10, bottom: 0 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis type="number" tick={{ fontSize: 12 }} allowDecimals={false} />
-              <YAxis dataKey="status" type="category" tick={{ fontSize: 12 }} />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-              <Bar dataKey="count" radius={[0, 8, 8, 0]} fill="#0EA5E9" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export const SuperAdminDashboard = () => {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  const [stats, setStats] = useState(null);
-  const [tiers, setTiers] = useState(null);
-  const [trend, setTrend] = useState([]);
-  const [monthLock, setMonthLock] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const currentMonth = new Date().toISOString().slice(0, 7);
-        const [statsRes, tiersRes, trendRes, lockRes] = await Promise.all([
-          api.get('/stats/super-admin'),
-          api.get('/stats/users-by-tier'),
-          api.get('/stats/applications-trend'),
-          api.get(`/workforce/month-lock/status?month=${currentMonth}`).catch(() => ({ data: { data: null } })),
-        ]);
-        setStats(statsRes.data.data);
-        setTiers(tiersRes.data.data);
-        setTrend(trendRes.data.data);
-        setMonthLock(lockRes?.data?.data || null);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
-        </div>
-      </div>
-    );
-  }
-
-  const tierPieData = tiers ? [
-    { name: 'T1', value: tiers.T1 || 0, color: '#059669', fill: '#059669' },
-    { name: 'T2', value: tiers.T2 || 0, color: '#0284C7', fill: '#0284C7' },
-    { name: 'T3', value: tiers.T3 || 0, color: '#7C3AED', fill: '#7C3AED' },
-    { name: 'Admin', value: (tiers.Admin || 0) + (tiers.SuperAdmin || 0), color: '#DC2626', fill: '#DC2626' },
-  ].filter((d) => d.value > 0) : [];
-
-  return (
-    <div className="space-y-6">
-      <AnnouncementBanner />
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Welcome, {user?.name || 'Super Admin'}</h1>
-          <p className="text-gray-500">Full system governance, security, and workforce overview.</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => navigate('/super-admin/admins')}
-            className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
-          >
-            <Shield size={14} /> System Admins
-          </button>
-          <button
-            onClick={() => navigate('/super-admin/sessions')}
-            className="px-3.5 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
-          >
-            <Key size={14} /> Active Sessions
-          </button>
-          <button
-            onClick={() => navigate('/super-admin/audit')}
-            className="px-3.5 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
-          >
-            <ScrollText size={14} /> Audit Trail
-          </button>
-          <button
-            onClick={() => navigate('/t3/workforce')}
-            className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
-          >
-            <Calendar size={14} /> Workforce Engine
-          </button>
-        </div>
-      </div>
-
-      {/* Central Month Lock Sentinel */}
-      <div className="bg-slate-900 text-white rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border border-slate-800 shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${monthLock?.isLocked ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
-            <Lock className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-sm">Central Month Lock Status</span>
-              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${monthLock?.isLocked ? 'bg-red-900/60 text-red-300 border border-red-700/50' : 'bg-emerald-900/60 text-emerald-300 border border-emerald-700/50'}`}>
-                {monthLock?.isLocked ? 'LOCKED' : 'OPEN / ACTIVE'}
-              </span>
-            </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Cycle ({new Date().toISOString().slice(0, 7)}): {monthLock?.isLocked ? `Locked against retroactive changes by ${monthLock.lockedByName || 'Super Admin'}` : 'Attendance and timesheets are editable by leads and team members.'}
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={() => navigate('/t3/workforce')}
-          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shrink-0"
-        >
-          Manage Lock & Shifts →
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <Kpi label="Admins" value={stats?.admins ?? 0} />
-        <Kpi label="Total Users" value={stats?.totalUsers ?? 0} />
-        <Kpi label="Active Events" value={stats?.activeEvents ?? 0} />
-        <Kpi label="Check-ins Today" value={stats?.sessionsToday ?? 0} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 min-w-0 overflow-hidden">
-          <h3 className="font-semibold mb-4">Users by Tier</h3>
-          {tierPieData.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">No data</div>
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie data={tierPieData} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={3} dataKey="value" />
-
-
-
-
-                <Tooltip />
-                <Legend wrapperStyle={{ fontSize: '12px' }} iconType="circle" />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 min-w-0 overflow-hidden">
-          <h3 className="font-semibold mb-4">Applications (7 Days)</h3>
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={trend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="day" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-              <Bar dataKey="count" fill="#EF4444" radius={[8, 8, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 export const T1Dashboard = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -4022,12 +3333,10 @@ export const EventsPage = () => {
   const fetchData = async () => {
     try {
       const promises = [api.get('/events')];
-      if (canCreate) promises.push(api.get('/admin/users'));
       if (canApply) promises.push(api.get('/applications/me'));
 
       const results = await Promise.all(promises);
       setEvents(results[0].data.data);
-      if (canCreate) setUsers(results[1].data.data);
       if (canApply) setMyApplications(results[1].data.data);
     } catch (err) {
       console.error(err);
@@ -4037,6 +3346,13 @@ export const EventsPage = () => {
   };
 
   useEffect(() => { void fetchData(); }, []);
+
+  // Defer fetching users for Event Head selector until Create Event modal opens
+  useEffect(() => {
+    if (modal && canCreate && users.length === 0) {
+      api.get('/admin/users').then((res) => setUsers(res.data?.data || [])).catch(console.error);
+    }
+  }, [modal, canCreate, users.length]);
 
   // Open apply modal → fetch teams for this event
   const openApplyModal = async (ev) => {
@@ -6663,7 +5979,7 @@ export const AdminManagementPage = () => {
   useEffect(() => {
     (async () => {
       try {
-        const res = await api.get('/admin/users');
+        const res = await api.get('/admin/users?role=ADMIN,SUPER_ADMIN');
         // Filter to only admin-level accounts
         setAdmins((res.data.data || []).filter((u) =>
           ['ADMIN', 'SUPER_ADMIN'].includes(u.role)
@@ -6724,170 +6040,6 @@ export const AdminManagementPage = () => {
           </table>
           </div>
         )}
-      </div>
-    </div>
-  );
-};
-
-// ====================================================================
-// ANALYTICS
-// ====================================================================
-export const AnalyticsPage = () => {
-  const [stats, setStats] = useState(null);
-  const [tiers, setTiers] = useState(null);
-  const [monthly, setMonthly] = useState([]);
-  const [top, setTop] = useState([]);
-  const [attendance, setAttendance] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const [statsRes, tiersRes, monthlyRes, topRes, attendRes] = await Promise.all([
-          api.get('/stats/admin'),
-          api.get('/stats/users-by-tier'),
-          api.get('/stats/monthly-applications'),
-          api.get('/stats/top-performers'),
-          api.get('/stats/attendance'),
-        ]);
-        setStats(statsRes.data.data);
-        setTiers(tiersRes.data.data);
-        setMonthly(monthlyRes.data.data);
-        setTop(topRes.data.data);
-        setAttendance(attendRes.data.data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
-        </div>
-        <Skeleton className="h-80 rounded-xl" />
-      </div>
-    );
-  }
-
-  const tierPieData = [
-    { name: 'T1', value: tiers.T1, color: '#059669', fill: '#059669' },
-    { name: 'T2', value: tiers.T2, color: '#0284C7', fill: '#0284C7' },
-    { name: 'T3', value: tiers.T3, color: '#7C3AED', fill: '#7C3AED' },
-    { name: 'Admin', value: tiers.Admin + tiers.SuperAdmin, color: '#DC2626', fill: '#DC2626' },
-  ].filter((d) => d.value > 0);
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Analytics</h1>
-        <p className="text-gray-500">Insights and trends across the platform</p>
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi label="Total Users" value={stats.totalUsers} />
-        <Kpi label="Active Events" value={stats.activeEvents} />
-        <Kpi label="Approval Rate" value={`${stats.approvalRate}%`} />
-        <Kpi label="Today Attendance" value={attendance ? `${attendance.rate}%` : '—'} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-gray-200">
-          <h3 className="font-semibold mb-4">User Distribution</h3>
-          {tierPieData.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">No data</div>
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie data={tierPieData} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value" />
-
-
-
-
-                <Tooltip />
-                <Legend wrapperStyle={{ fontSize: '12px' }} iconType="circle" />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200 lg:col-span-2">
-          <h3 className="font-semibold mb-4">Applications — Last 12 Months</h3>
-          <ResponsiveContainer width="100%" height={260}>
-            <AreaChart data={monthly} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="colorApps" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#0EA5E9" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="#0EA5E9" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-              <Area type="monotone" dataKey="count" stroke="#0EA5E9" strokeWidth={2.5} fillOpacity={1} fill="url(#colorApps)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-gray-200">
-          <h3 className="font-semibold mb-4">Today's Attendance</h3>
-          {!attendance || attendance.total === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">No check-ins today</div>
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie
-                  data={[
-                    { name: 'Present', value: attendance.present, fill: '#10B981' },
-                    { name: 'Late', value: attendance.late, fill: '#F59E0B' },
-                    { name: 'Absent', value: attendance.absent, fill: '#EF4444' },
-                  ]}
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={90}
-                  dataKey="value"
-                  label={({ name, value }) => `${name}: ${value}`}
-                />
-
-
-
-
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200">
-          <h3 className="font-semibold mb-4">Top Performers</h3>
-          {top.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">No performance data yet</div>
-          ) : (
-            <div className="space-y-3">
-              {top.map((u, i) => (
-                <div key={u.userId} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0 ${i === 0 ? 'bg-amber-500' : i === 1 ? 'bg-gray-400' : i === 2 ? 'bg-amber-700' : 'bg-blue-500'
-                      }`}>{i + 1}</span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{u.name}</p>
-                      <p className="text-xs text-gray-500 truncate">{u.approvedCount} approved / {u.attendanceCount} days present</p>
-                    </div>
-                  </div>
-                  <div className="text-sm font-bold text-amber-600 flex-shrink-0">{u.score} pts</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
@@ -7254,23 +6406,26 @@ export const TeamsPage = () => {
   const [memberSearch, setMemberSearch] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Fetch teams + users on mount
+  // Fetch teams on mount
   useEffect(() => {
     (async () => {
       try {
-        const [teamsRes, usersRes] = await Promise.all([
-          api.get('/teams'),
-          canManage ? api.get('/admin/users') : Promise.resolve({ data: { data: [] } }),
-        ]);
-        setTeams(teamsRes.data.data);
-        setUsers(usersRes.data.data);
+        const teamsRes = await api.get('/teams');
+        setTeams(teamsRes.data?.data || []);
       } catch (err) {
         console.error(err);
       } finally {
         setLoading(false);
       }
     })();
-  }, [canManage]);
+  }, []);
+
+  // Defer fetching users until Create or Member management modals are opened
+  useEffect(() => {
+    if ((createModal || detailModal || addMemberModal) && canManage && users.length === 0) {
+      api.get('/admin/users').then((res) => setUsers(res.data?.data || [])).catch(console.error);
+    }
+  }, [createModal, detailModal, addMemberModal, canManage, users.length]);
 
   // Create team
   const createTeam = async (e) => {
@@ -8270,45 +7425,43 @@ export const T3DashboardEnhanced = () => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [eventsRes, statsRes] = await Promise.all([
-          api.get('/events/me'),
-          api.get('/stats/t3'),
-        ]);
-        setMyEvents(eventsRes.data.data);
-        setStats(statsRes.data.data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
   const [teamAttendance, setTeamAttendance] = useState([]);
 
   useEffect(() => {
+    let isMounted = true;
     (async () => {
       try {
-        const teamsRes = await api.get('/teams/me');
-        const list = teamsRes.data.data;
-        const withStats = await Promise.all(
-          list.map(async (t) => {
-            try {
-              const s = await api.get(`/attendance/team/stats?teamId=${t._id}`);
-              return { ...t, stats: s.data.data };
-            } catch {
-              return { ...t, stats: null };
-            }
-          })
-        );
-        setTeamAttendance(withStats);
+        const [eventsRes, statsRes, teamsRes] = await Promise.all([
+          api.get('/events/me'),
+          api.get('/stats/t3'),
+          api.get('/teams/me').catch(() => ({ data: { data: [] } })),
+        ]);
+
+        if (!isMounted) return;
+        setMyEvents(eventsRes.data?.data || []);
+        setStats(statsRes.data?.data || null);
+
+        const list = Array.isArray(teamsRes.data?.data) ? teamsRes.data.data : [];
+        if (list.length > 0) {
+          const withStats = await Promise.all(
+            list.map(async (t) => {
+              try {
+                const s = await api.get(`/attendance/team/stats?teamId=${t._id}`);
+                return { ...t, stats: s.data?.data || null };
+              } catch {
+                return { ...t, stats: null };
+              }
+            })
+          );
+          if (isMounted) setTeamAttendance(withStats);
+        }
       } catch (err) {
         console.error(err);
+      } finally {
+        if (isMounted) setLoading(false);
       }
     })();
+    return () => { isMounted = false; };
   }, []);
 
   if (loading) {
@@ -8580,47 +7733,6 @@ export const T2DashboardEnhanced = () => {
   );
 };
 
-// ====================================================================
-// SKELETONS
-// ====================================================================
-export const Skeleton = ({ className = '' }) => (
-  <div className={`animate-pulse bg-gray-200 rounded ${className}`} />
-);
-
-export const SkeletonCard = () => (
-  <div className="bg-white p-5 rounded-xl border border-gray-200">
-    <Skeleton className="h-3 w-24 mb-3" />
-    <Skeleton className="h-8 w-20" />
-  </div>
-);
-
-export const SkeletonTable = ({ rows = 5, cols = 4 }) => (
-  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-    <div className="bg-gray-50 border-b border-gray-200 p-4 flex gap-4">
-      {Array.from({ length: cols }).map((_, i) => <Skeleton key={i} className="h-3 flex-1" />)}
-    </div>
-    {Array.from({ length: rows }).map((_, r) => (
-      <div key={r} className="p-4 flex gap-4 border-b border-gray-100 last:border-0">
-        {Array.from({ length: cols }).map((_, c) => <Skeleton key={c} className="h-4 flex-1" />)}
-      </div>
-    ))}
-  </div>
-);
-
-export const SkeletonCardGrid = ({ count = 3 }) => (
-  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-    {Array.from({ length: count }).map((_, i) => (
-      <div key={i} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <Skeleton className="h-32 rounded-none" />
-        <div className="p-5 space-y-3">
-          <Skeleton className="h-4 w-3/4" />
-          <Skeleton className="h-3 w-1/2" />
-        </div>
-      </div>
-    ))}
-  </div>
-);
-
 export const useFakeLoading = (ms = 600) => {
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -8665,16 +7777,15 @@ export const EventDetailPage = () => {
   };
 
   useEffect(() => {
-    (async () => {
-      await fetchEvent();
-      if (canAddMembers) {
-        try {
-          const res = await api.get('/admin/users');
-          setUsers(res.data.data);
-        } catch (err) { console.error(err); }
-      }
-    })();
-  }, [id, canAddMembers]);
+    void fetchEvent();
+  }, [id]);
+
+  // Defer fetching candidate users until Add Member modal or Edit modal is opened
+  useEffect(() => {
+    if ((addMemberModal || editModal) && canAddMembers && users.length === 0) {
+      api.get('/admin/users').then((res) => setUsers(res.data?.data || [])).catch(console.error);
+    }
+  }, [addMemberModal, editModal, canAddMembers, users.length]);
 
   const addMember = async (userId) => {
     setSaving(true);

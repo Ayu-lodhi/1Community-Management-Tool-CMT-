@@ -42,8 +42,25 @@ const generateDefaultPassword = () => {
 
 const LOGIN_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
-exports.getAllUsers = async () => {
-  return await User.find().select('-password').sort({ createdAt: -1 });
+exports.getAllUsers = async (options = {}) => {
+  const query = {};
+  if (options.role) {
+    if (typeof options.role === 'string' && options.role.includes(',')) {
+      query.role = { $in: options.role.split(',').map((r) => r.trim()).filter(Boolean) };
+    } else {
+      query.role = options.role;
+    }
+  }
+
+  let dbQuery = User.find(query).select('-password').sort({ createdAt: -1 });
+
+  if (options.limit) {
+    const limitNum = Math.min(500, Math.max(1, parseInt(options.limit, 10) || 50));
+    const pageNum = Math.max(1, parseInt(options.page, 10) || 1);
+    dbQuery = dbQuery.skip((pageNum - 1) * limitNum).limit(limitNum);
+  }
+
+  return await dbQuery.lean();
 };
 
 exports.createUser = async (data, callerRole = null) => {

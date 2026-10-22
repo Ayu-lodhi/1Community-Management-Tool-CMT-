@@ -159,7 +159,7 @@ class ApplicationService {
       query.$and = [{ teamId: { $in: teamIds } }];
     }
 
-    return await Application.find(query).sort({ appliedAt: -1 }).limit(200);
+    return await Application.find(query).sort({ appliedAt: -1 }).limit(200).lean();
   }
 
   // Alias for backward compatibility
@@ -169,7 +169,7 @@ class ApplicationService {
 
   // Student's own applications
   async getMine(userId) {
-    return await Application.find({ studentId: userId }).sort({ appliedAt: -1 });
+    return await Application.find({ studentId: userId }).sort({ appliedAt: -1 }).lean();
   }
 
   // Alias for backward compatibility
