@@ -47,6 +47,7 @@ coverage/
 
 # Local agent / skill tooling
 .agents/
+.arena/
 skills-lock.json
 
 # Vercel deployment metadata & cache

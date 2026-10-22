@@ -170,6 +170,7 @@ const issueSession = (user, isMfaVerified, sessionId) => {
 
   return {
     user: {
+      id: user._id,
       _id: user._id,
       userId: user.userId,
       name: user.name,

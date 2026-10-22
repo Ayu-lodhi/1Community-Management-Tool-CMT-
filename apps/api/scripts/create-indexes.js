@@ -13,6 +13,10 @@ import '../src/modules/timesheets/timesheets.model.js';
 import '../src/modules/announcements/announcements.model.js';
 import '../src/modules/chat/chat.model.js';
 import '../src/modules/notifications/notifications.model.js';
+import '../src/modules/hr/hr.masters.model.js';
+import '../src/modules/hr/hr.profile.model.js';
+import '../src/modules/hr/hr.incidents.model.js';
+import '../src/modules/hr/hr.reviews.model.js';
 
 const URI = process.env.MONGODB_URI;
 if (!URI) {
@@ -46,7 +50,17 @@ async function run() {
     mongoose.models.Notification
   ].filter(Boolean);
 
-  const allModels = [...correctnessModels, ...performanceModels];
+  const hrModels = [
+    mongoose.models.HrDepartment,
+    mongoose.models.HrPost,
+    mongoose.models.HrEmployeeCategory,
+    mongoose.models.HrPerformanceFactor,
+    mongoose.models.HrProfile,
+    mongoose.models.HrIncident,
+    mongoose.models.HrReview
+  ].filter(Boolean);
+
+  const allModels = [...correctnessModels, ...performanceModels, ...hrModels];
 
   for (const model of allModels) {
     if (!model) continue;

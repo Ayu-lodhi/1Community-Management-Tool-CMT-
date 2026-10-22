@@ -26,6 +26,9 @@ const isAllowedOrigin = (origin) => {
     const list = process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean);
     if (list.includes(origin)) return true;
   }
+  if (process.env.CLIENT_URL && origin === process.env.CLIENT_URL) return true;
+  if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) return true;
+  if (process.env.VERCEL && origin.endsWith('.vercel.app')) return true;
   if (process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
     return true;
   }
@@ -59,6 +62,7 @@ const { createUserLimiter } = require('./middleware/rateLimit.middleware');
 
 app.use('/api/v1/announcements', require('./modules/announcements/announcements.routes'));
 app.use('/api/v1/timesheets', require('./modules/timesheets/timesheets.routes'));
+app.use('/api/v1/workforce', require('../../api/src/modules/workforce/workforce.routes'));
 app.use('/api/v1/profile', require('./modules/profile/profile.routes'));
 app.patch('/api/v1/admin/users/:userId/tier', protect, restrictTo('ADMIN', 'SUPER_ADMIN'), createUserLimiter, require('./modules/profile/profile.controller').updateUserTier);
 
@@ -89,7 +93,7 @@ app.get('/health', (req, res) => res.redirect('/api/health'));
 
 app.use((req, res) => res.status(404).json({ success: false, message: 'Route not found' }));
 app.use((err, req, res, next) => {
-  const status = err.status || 500;
+  const status = err.status || err.statusCode || 500;
   const isProd = process.env.NODE_ENV === 'production';
   const requestId = req?.id || req?.headers?.['x-request-id'] || null;
   console.error('Server error:', {
@@ -98,7 +102,7 @@ app.use((err, req, res, next) => {
     requestId,
     stack: isProd ? undefined : err.stack,
   });
-  const message = isProd && status >= 500 ? 'Internal server error' : err.message;
+  const message = (isProd && status === 500 && !err.expose) ? (err.message?.includes('JWT') || err.message?.includes('database') || err.message?.includes('Mongo') ? err.message : 'Internal server error') : err.message;
   res.status(status).json({ success: false, message });
 });
 

@@ -2,7 +2,7 @@
 // pages.jsx — All Page Components for TBI Management System
 // ====================================================================
 
-import React, { useState, createContext, useContext, useEffect, useRef, useCallback } from 'react';
+import React, { useState, createContext, useContext, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Navigate, NavLink, useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, ScrollText, Monitor, Settings, Shield, FileText,
@@ -15,286 +15,16 @@ import {
   Menu
 } from 'lucide-react';
 import api from './lib/api';
-import { io } from 'socket.io-client';
-import {
-  PieChart, Pie, BarChart, Bar, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  AreaChart, Area,
-} from 'recharts';
 
-const BACKEND_URL = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? '' : 'http://localhost:5000');
+const BACKEND_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? '' : 'http://localhost:5000');
 const API_BASE = `${BACKEND_URL}/api/v1`;
 
-// ====================================================================
-// AUTH CONTEXT
-// ====================================================================
-const AuthContext = createContext(null);
-export const useAuth = () => useContext(AuthContext);
-
-// ====================================================================
-// SOCKET CONTEXT
-// ====================================================================
-const SocketContext = createContext(null);
-export const useSocket = () => useContext(SocketContext);
-
-export const SocketProvider = ({ children }) => {
-  const { user } = useAuth();
-  const [socket, setSocket] = useState(null);
-
-  useEffect(() => {
-    if (!user) {
-      if (socket) {
-        socket.disconnect();
-        setSocket(null);
-      }
-      return;
-    }
-
-    const token = typeof window !== 'undefined' ? (sessionStorage.getItem('tbi_token') || localStorage.getItem('tbi_token')) : null;
-    if (!token) return;
-
-    const newSocket = io(BACKEND_URL || (typeof window !== 'undefined' ? window.location.origin : ''), {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionAttempts: 10,
-    });
-
-    newSocket.on('connect', () => {
-      console.log('Real-time connected');
-    });
-
-    newSocket.on('connect_error', (err) => {
-      console.warn('Socket connection error:', err.message);
-    });
-
-    setSocket(newSocket);
-
-    return () => {
-      newSocket.disconnect();
-    };
-  }, [user]);
-
-  return <SocketContext.Provider value={socket}>{children}</SocketContext.Provider>;
-};
-
-export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [initializing, setInitializing] = useState(true);
-
-  // Restore session from sessionStorage on mount (tab-isolated)
-  useEffect(() => {
-    try {
-      // If URL explicitly requests a fresh session, clear this tab's auth
-      if (typeof window !== 'undefined') {
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('new_session') === 'true') {
-          sessionStorage.removeItem('tbi_user');
-          sessionStorage.removeItem('tbi_token');
-          localStorage.removeItem('tbi_user');
-          localStorage.removeItem('tbi_token');
-          setInitializing(false);
-          return;
-        }
-      }
-
-      let storedUser = typeof window !== 'undefined' ? sessionStorage.getItem('tbi_user') : null;
-      let storedToken = typeof window !== 'undefined' ? sessionStorage.getItem('tbi_token') : null;
-
-      // Backward compatibility: migrate legacy single-session from localStorage to current tab's sessionStorage
-      if (!storedUser || !storedToken) {
-        const legacyUser = typeof window !== 'undefined' ? localStorage.getItem('tbi_user') : null;
-        const legacyToken = typeof window !== 'undefined' ? localStorage.getItem('tbi_token') : null;
-        if (legacyUser && legacyToken) {
-          storedUser = legacyUser;
-          storedToken = legacyToken;
-          sessionStorage.setItem('tbi_user', legacyUser);
-          sessionStorage.setItem('tbi_token', legacyToken);
-        }
-        // Remove from localStorage so subsequent new tabs start fresh with independent sessions
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('tbi_user');
-          localStorage.removeItem('tbi_token');
-        }
-      }
-
-      if (storedUser && storedToken) {
-        setUser(JSON.parse(storedUser));
-      }
-    } catch (err) {
-      console.error('Failed to restore session:', err);
-      if (typeof window !== 'undefined') {
-        sessionStorage.removeItem('tbi_user');
-        sessionStorage.removeItem('tbi_token');
-        localStorage.removeItem('tbi_user');
-        localStorage.removeItem('tbi_token');
-      }
-    } finally {
-      setInitializing(false);
-    }
-  }, []);
-
-  const login = (u, t) => {
-    setUser(u);
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('tbi_user', JSON.stringify(u));
-      sessionStorage.setItem('tbi_token', t);
-      // Clean localStorage so new tabs are not automatically forced into this account
-      localStorage.removeItem('tbi_user');
-      localStorage.removeItem('tbi_token');
-    }
-  };
-
-  const logout = useCallback(async () => {
-    try {
-      const token = typeof window !== 'undefined' ? (sessionStorage.getItem('tbi_token') || localStorage.getItem('tbi_token')) : null;
-      if (token) {
-        fetch(`${API_BASE}/auth/logout`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-        }).catch(() => {});
-      }
-    } catch {}
-    setUser(null);
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('tbi_user');
-      sessionStorage.removeItem('tbi_token');
-      localStorage.removeItem('tbi_user');
-      localStorage.removeItem('tbi_token');
-    }
-  }, []);
-
-  const updateUser = (updatedFields) => {
-    setUser((prev) => {
-      const next = { ...prev, ...updatedFields };
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem('tbi_user', JSON.stringify(next));
-      }
-      return next;
-    });
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, login, logout, initializing, updateUser }}>
-      {children}
-      {user && <IdleTimeoutWatcher logout={logout} />}
-    </AuthContext.Provider>
-  );
-};
-
-// ====================================================================
-// IDLE TIMEOUT WATCHER — Inactivity auto-logout
-// "if user is idle and not making any requests, auto log out from system"
-// ====================================================================
-const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes of inactivity
-const WARNING_WINDOW_MS = 60 * 1000;          // 60 seconds warning countdown
-
-export const IdleTimeoutWatcher = ({ logout }) => {
-  const [showWarning, setShowWarning] = useState(false);
-  const [secondsRemaining, setSecondsRemaining] = useState(60);
-  const lastActivityRef = useRef(Date.now());
-
-  const resetActivity = useCallback(() => {
-    lastActivityRef.current = Date.now();
-    setShowWarning(false);
-  }, []);
-
-  useEffect(() => {
-    const handleActivity = () => {
-      lastActivityRef.current = Date.now();
-    };
-
-    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click', 'wheel'];
-    events.forEach((ev) => window.addEventListener(ev, handleActivity, { passive: true }));
-    window.addEventListener('app:activity', handleActivity);
-
-    const interval = setInterval(() => {
-      const timeoutLimit =
-        (typeof window !== 'undefined' && window.__IDLE_TIMEOUT_MS) || DEFAULT_IDLE_TIMEOUT_MS;
-      const warningThreshold = Math.min(WARNING_WINDOW_MS, Math.floor(timeoutLimit / 2));
-      const idleTime = Date.now() - lastActivityRef.current;
-      const timeLeft = timeoutLimit - idleTime;
-
-      if (timeLeft <= 0) {
-        clearInterval(interval);
-        setShowWarning(false);
-        if (logout) logout();
-        if (typeof window !== 'undefined') {
-          sessionStorage.removeItem('tbi_user');
-          sessionStorage.removeItem('tbi_token');
-          window.location.href = '/login?reason=inactivity';
-        }
-      } else if (timeLeft <= warningThreshold) {
-        setShowWarning(true);
-        setSecondsRemaining(Math.max(1, Math.ceil(timeLeft / 1000)));
-      } else {
-        setShowWarning(false);
-      }
-    }, 1000);
-
-    return () => {
-      events.forEach((ev) => window.removeEventListener(ev, handleActivity));
-      window.removeEventListener('app:activity', handleActivity);
-      clearInterval(interval);
-    };
-  }, [logout]);
-
-  if (!showWarning) return null;
-
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
-      <div className="max-w-sm w-full bg-white rounded-2xl shadow-2xl border-2 border-amber-400 p-6 text-center animate-fade-in">
-        <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto mb-3 text-amber-600 shadow-inner">
-          <Clock className="w-7 h-7 animate-pulse" />
-        </div>
-        <h3 className="text-lg font-bold text-slate-900">Session Inactivity Warning</h3>
-        <p className="text-xs text-slate-500 mt-1 mb-4 leading-relaxed">
-          You have been idle for a while. To protect your account, your session will automatically end in:
-        </p>
-        <div className="inline-flex items-center justify-center px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl mb-5">
-          <span className="text-2xl font-mono font-black text-amber-700">
-            {secondsRemaining}s
-          </span>
-        </div>
-        <div className="flex gap-2 justify-center">
-          <button
-            type="button"
-            onClick={() => {
-              if (logout) logout();
-              window.location.href = '/login?reason=manual';
-            }}
-            className="px-4 py-2.5 rounded-xl border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-100 transition cursor-pointer"
-          >
-            Log Out Now
-          </button>
-          <button
-            type="button"
-            onClick={resetActivity}
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-sm cursor-pointer"
-          >
-            Stay Logged In
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-
-// ====================================================================
-// ROLES
-// ====================================================================
-export const ROLES = {
-  SUPER_ADMIN: { label: 'Super Admin', code: 'SA', color: '#DC2626', sidebarBg: '#0B1120', route: '/super-admin' },
-  ADMIN: { label: 'Admin', code: 'AD', color: '#0B5CAD', sidebarBg: '#0B1120', route: '/admin' },
-  T3_EXECUTIVE: { label: 'T3 Executive', code: 'T3', color: '#2563EB', sidebarBg: '#0B1120', route: '/t3' },
-  T2_ASSOCIATE: { label: 'T2 Associate', code: 'T2', color: '#0284C7', sidebarBg: '#0B1120', route: '/t2' },
-  T1_VOLUNTEER: { label: 'T1 Volunteer', code: 'T1', color: '#DC2626', sidebarBg: '#0B1120', route: '/t1' },
-};
+export {
+  AuthContext, useAuth,
+  SocketContext, useSocket, SocketProvider,
+  AuthProvider, IdleTimeoutWatcher, ROLES
+} from './context/AuthContext';
+import { useAuth, useSocket, ROLES } from './context/AuthContext';
 
 // ====================================================================
 // SIDEBAR MENUS
@@ -312,12 +42,15 @@ const MENUS = {
         { icon: Users, label: 'Users', to: '/admin/users' },
         { icon: UserPlus, label: 'Add User', to: '/admin/users/new' },
         { icon: Upload, label: 'Bulk Import', to: '/admin/users/bulk' },
+        { icon: Users, label: 'Member Operations', to: '/hr' },
       ]
     },
     {
       section: 'OPERATIONS', items: [
         { icon: Calendar, label: 'Events', to: '/admin/events' },
         { icon: UsersRound, label: 'Teams', to: '/admin/teams' },
+        { icon: Calendar, label: 'Workforce Roster', to: '/t3/workforce' },
+        { icon: FileCheck, label: 'Timesheet Approvals', to: '/t3/approvals' },
         { icon: FileCheck, label: 'Approval Requests', to: '/admin/applications' },
         { icon: MessageSquare, label: 'Team Chats', to: '/chat' },
         { icon: Bell, label: 'Announcements', to: '/announcements' },
@@ -346,12 +79,15 @@ const MENUS = {
         { icon: Users, label: 'Users', to: '/admin/users' },
         { icon: UserPlus, label: 'Add User', to: '/admin/users/new' },
         { icon: Upload, label: 'Bulk Import', to: '/admin/users/bulk' },
+        { icon: Users, label: 'Member Operations', to: '/hr' },
       ]
     },
     {
       section: 'OPERATIONS', items: [
         { icon: Calendar, label: 'Events', to: '/admin/events' },
         { icon: UsersRound, label: 'Teams', to: '/admin/teams' },
+        { icon: Calendar, label: 'Workforce Roster', to: '/t3/workforce' },
+        { icon: FileCheck, label: 'Timesheet Approvals', to: '/t3/approvals' },
         { icon: FileCheck, label: 'Approval Requests', to: '/admin/applications' },
         { icon: MessageSquare, label: 'Team Chats', to: '/chat' },
         { icon: Bell, label: 'Announcements', to: '/announcements' },
@@ -369,10 +105,14 @@ const MENUS = {
     {
       section: 'MY WORKSPACE', items: [
         { icon: LayoutDashboard, label: 'Dashboard', to: '/t3' },
+        { icon: Calendar, label: 'Shift Calendar', to: '/t3/workforce' },
+        { icon: FileCheck, label: 'Timesheet Approvals', to: '/t3/approvals' },
         { icon: UsersRound, label: 'My Teams', to: '/t3/teams' },
         { icon: Users, label: 'Team Profiles', to: '/profile/team' },
+        { icon: Award, label: 'Team Evaluations', to: '/hr' },
         { icon: FileCheck, label: 'Approval Requests', to: '/t3/applications' },
         { icon: CheckCircle, label: 'Attendance', to: '/t3/attendance' },
+        { icon: Clock, label: 'My Schedule', to: '/my-workforce' },
         { icon: Clock, label: 'Timesheets', to: '/timesheets' },
       ]
     },
@@ -395,6 +135,8 @@ const MENUS = {
     {
       section: 'MY WORKSPACE', items: [
         { icon: LayoutDashboard, label: 'Dashboard', to: '/t2' },
+        { icon: Award, label: 'My Scorecard', to: '/scorecard' },
+        { icon: Calendar, label: 'My Schedule & Timesheet', to: '/my-workforce' },
         { icon: Calendar, label: 'Browse Events', to: '/t2/events' },
         { icon: FileCheck, label: 'Approval Requests', to: '/t2/applications' },
         { icon: Clock, label: 'My Shifts', to: '/t2/shifts' },
@@ -419,6 +161,8 @@ const MENUS = {
     {
       section: 'MY WORKSPACE', items: [
         { icon: LayoutDashboard, label: 'Dashboard', to: '/t1' },
+        { icon: Award, label: 'My Scorecard', to: '/scorecard' },
+        { icon: Calendar, label: 'My Schedule & Timesheet', to: '/my-workforce' },
         { icon: Calendar, label: 'Browse Events', to: '/t1/events' },
         { icon: FileCheck, label: 'Approval Requests', to: '/t1/applications' },
         { icon: QrCode, label: 'QR Check-In', to: '/t1/checkin' },
@@ -534,10 +278,16 @@ export const Login = () => {
       try {
         data = await res.json();
       } catch {
-        throw new Error('Unable to connect to the server. Please try again shortly.');
+        if (res.status === 503) {
+          throw new Error('Database or server initializing (503). Please retry in 5 seconds.');
+        }
+        if (res.status === 404) {
+          throw new Error('API route not found (404). Please check server routing.');
+        }
+        throw new Error(`Server returned error status ${res.status}. Please try again.`);
       }
       if (!data.success) {
-        const err = new Error(data.message || 'Login failed');
+        const err = new Error(data.error || data.message || 'Login failed');
         err.status = res.status;
         throw err;
       }
@@ -558,7 +308,7 @@ export const Login = () => {
       const raw = err?.message || '';
       if (err.status === 409 || /already logged in/i.test(raw)) {
         setError(raw || 'This account is already logged in on another device');
-      } else if (/invalid|incorrect|credential|password|email/i.test(raw) && !/server|init|import|syntax|failed/i.test(raw)) {
+      } else if (/invalid|incorrect|credential|password|email/i.test(raw) && !/server|init|import|syntax|failed|validation|missing|config/i.test(raw)) {
         setError('Invalid username or password. Please verify your credentials.');
       } else if (/rate limit|too many/i.test(raw)) {
         setError('Too many login attempts. Please wait a moment and try again.');
@@ -602,7 +352,13 @@ export const Login = () => {
       try {
         data = await res.json();
       } catch {
-        throw new Error('Unable to connect to the server. Please try again shortly.');
+        if (res.status === 503) {
+          throw new Error('Database or server initializing (503). Please retry in 5 seconds.');
+        }
+        if (res.status === 404) {
+          throw new Error('API route not found (404). Please check server routing.');
+        }
+        throw new Error(`Server returned error status ${res.status}. Please try again.`);
       }
       if (!data.success) {
         throw new Error(data.message || 'MFA verification failed');
@@ -932,8 +688,9 @@ export const Sidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const socket = useSocket();
-  const cfg = ROLES[user.role];
-  const menus = MENUS[user.role];
+  const role = user?.role || 'T1_VOLUNTEER';
+  const cfg = ROLES[role] || ROLES.T1_VOLUNTEER;
+  const menus = MENUS[role] || MENUS.T1_VOLUNTEER;
 
   // Dynamic notification counts
   const [badges, setBadges] = useState({
@@ -1111,7 +868,7 @@ export const Sidebar = () => {
                 {cfg.code}
               </div>
               <div className="min-w-0">
-                <p className="text-white text-sm font-medium truncate">{user.name}</p>
+                <p className="text-white text-sm font-medium truncate">{user?.name || 'User'}</p>
                 <span className="text-[10px] text-white/80">{cfg.label}</span>
               </div>
             </div>
@@ -1201,7 +958,8 @@ export const Topbar = () => {
   const { setMobileOpen } = useLayout();
   const navigate = useNavigate();
   const socket = useSocket();
-  const cfg = ROLES[user.role];
+  const role = user?.role || 'T1_VOLUNTEER';
+  const cfg = ROLES[role] || ROLES.T1_VOLUNTEER;
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
@@ -1284,13 +1042,13 @@ export const Topbar = () => {
         >
           <div
             className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-xs"
-            style={{ backgroundColor: cfg.color }}
+            style={{ backgroundColor: cfg?.color || '#0B5CAD' }}
           >
-            {user.name.charAt(0)}
+            {user?.name ? user.name.charAt(0) : 'U'}
           </div>
           <div className="hidden sm:block text-left">
-            <p className="text-sm font-medium text-gray-800 leading-tight truncate max-w-[120px]">{user.name}</p>
-            <p className="text-[11px] text-gray-500 leading-tight">{cfg.label}</p>
+            <p className="text-sm font-medium text-gray-800 leading-tight truncate max-w-[120px]">{user?.name || 'User'}</p>
+            <p className="text-[11px] text-gray-500 leading-tight">{cfg?.label || 'User'}</p>
           </div>
         </div>
       </div>
@@ -1351,74 +1109,14 @@ export const Layout = ({ children }) => {
   );
 };
 
-// ====================================================================
-// SHARED
-// ====================================================================
-export const Kpi = ({ label, value, change }) => (
-  <div className="bg-white p-3.5 sm:p-5 rounded-xl border border-gray-200 hover:shadow-md transition-shadow min-w-0">
-    <p className="text-xs sm:text-sm text-gray-500 truncate">{label}</p>
-    <p className="text-xl sm:text-2xl md:text-3xl font-bold mt-1 sm:mt-2 truncate text-gray-900">{value}</p>
-    {change && <p className="text-[10px] sm:text-xs text-green-500 mt-1">+{change}</p>}
-  </div>
-);
-export const KPI = Kpi;
-
-// ====================================================================
-// ANNOUNCEMENT BANNER — Shows on dashboards when there are new announcements
-// ====================================================================
-export const AnnouncementBanner = () => {
-  const navigate = useNavigate();
-  const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    const fetchCount = async () => {
-      try {
-        const res = await api.get('/announcements');
-        const recent = (res.data.data || []).filter((a) => {
-          const created = new Date(a.createdAt).getTime();
-          const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-          return created > weekAgo;
-        });
-        setCount(recent.length);
-      } catch (err) {
-        // Silent
-      }
-    };
-    void fetchCount();
-  }, []);
-
-  if (count === 0) return null;
-
-  return (
-    <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl p-4 flex items-center justify-between text-white">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
-          <Bell className="w-5 h-5" />
-        </div>
-        <div>
-          <p className="font-semibold text-sm">
-            {count} new announcement{count > 1 ? 's' : ''} this week
-          </p>
-          <p className="text-xs opacity-90">Check what's happening on the platform</p>
-        </div>
-      </div>
-      <button
-        onClick={() => navigate('/announcements')}
-        className="px-4 py-2 bg-white text-indigo-600 rounded-lg font-medium text-sm hover:bg-indigo-50 whitespace-nowrap"
-      >
-        View All
-      </button>
-    </div>
-  );
-};
-
-export const Placeholder = ({ title }) => (
-  <div className="flex flex-col items-center justify-center h-96 text-center">
-    <Construction className="w-16 h-16 text-gray-300 mb-4" />
-    <h2 className="text-2xl font-bold mb-2">{title}</h2>
-    <p className="text-gray-500">This page is under construction</p>
-  </div>
-);
+export {
+  Kpi, KPI, AnnouncementBanner, Placeholder,
+  Skeleton, SkeletonCard, SkeletonTable, SkeletonCardGrid
+} from './components/common/CommonUI';
+import {
+  Kpi, KPI, AnnouncementBanner, Placeholder,
+  Skeleton, SkeletonCard, SkeletonTable, SkeletonCardGrid
+} from './components/common/CommonUI';
 
 export const ProtectedRoute = ({ children, roles }) => {
   const { user, initializing } = useAuth();
@@ -1441,7 +1139,8 @@ export const ProtectedRoute = ({ children, roles }) => {
 
   if (!user || !hasToken) return <Navigate to="/login" replace />;
   if (roles && !roles.includes(user.role)) {
-    return <Navigate to={ROLES[user.role].route} replace />;
+    const targetRoute = ROLES[user?.role]?.route || '/login';
+    return <Navigate to={targetRoute} replace />;
   }
   return <Layout>{children}</Layout>;
 };
@@ -1450,277 +1149,6 @@ export const ProtectedRoute = ({ children, roles }) => {
 // ====================================================================
 // DASHBOARDS
 // ====================================================================
-export const AdminDashboard = () => {
-  const { user } = useAuth();
-  const [stats, setStats] = useState(null);
-  const [tiers, setTiers] = useState(null);
-  const [trend, setTrend] = useState([]);
-  const [attendance, setAttendance] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const [statsRes, tiersRes, trendRes, attendRes] = await Promise.all([
-          api.get('/stats/admin'),
-          api.get('/stats/users-by-tier'),
-          api.get('/stats/applications-trend'),
-          api.get('/stats/attendance'),
-        ]);
-        setStats(statsRes.data.data);
-        setTiers(tiersRes.data.data);
-        setTrend(trendRes.data.data);
-        setAttendance(attendRes.data.data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <Skeleton className="h-72 rounded-xl" />
-          <Skeleton className="h-72 rounded-xl" />
-        </div>
-      </div>
-    );
-  }
-
-  const tierPieData = tiers ? [
-    { name: 'T1 Volunteers', value: tiers.T1 || 0, color: '#059669', fill: '#059669' },
-    { name: 'T2 Associates', value: tiers.T2 || 0, color: '#0284C7', fill: '#0284C7' },
-    { name: 'T3 Executives', value: tiers.T3 || 0, color: '#7C3AED', fill: '#7C3AED' },
-    { name: 'Admins', value: (tiers.Admin || 0) + (tiers.SuperAdmin || 0), color: '#DC2626', fill: '#DC2626' },
-  ].filter((d) => d.value > 0) : [];
-
-  return (
-    <div className="space-y-6">
-      <AnnouncementBanner />
-      <div>
-        <h1 className="text-2xl font-bold">Good morning, {user.name.split(' ')[0]}</h1>
-        <p className="text-gray-500">Here's what's happening today.</p>
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <Kpi label="Total Users" value={stats?.totalUsers ?? 0} />
-        <Kpi label="Active Events" value={stats?.activeEvents ?? 0} />
-        <Kpi label="Approval Rate" value={`${stats?.approvalRate ?? 0}%`} />
-        <Kpi label="Teams" value={stats?.totalTeams ?? 0} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 min-w-0 overflow-hidden">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <Users className="w-5 h-5 text-gray-500" /> Users by Tier
-          </h3>
-          {tierPieData.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">
-              No users yet
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
-                <Pie
-                  data={tierPieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={3}
-                  dataKey="value"
-                  label={({ name, value }) => `${name}: ${value}`}
-                  labelLine={false}
-                />
-
-
-
-
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 min-w-0 overflow-hidden">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-gray-500" /> Applications (Last 7 Days)
-          </h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={trend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="day" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-              <Line type="monotone" dataKey="count" stroke="#0EA5E9" strokeWidth={3} dot={{ r: 5, fill: '#0EA5E9' }} activeDot={{ r: 7 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-gray-200">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <CheckCircle className="w-5 h-5 text-gray-500" /> Attendance Today
-          </h3>
-          {!attendance || attendance.total === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">
-              No check-ins today
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart
-                data={[
-                  { status: 'Present', count: attendance.present, fill: '#10B981' },
-                  { status: 'Late', count: attendance.late, fill: '#F59E0B' },
-                  { status: 'Absent', count: attendance.absent, fill: '#EF4444' },
-                ]}
-                margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="status" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-                <Bar dataKey="count" radius={[8, 8, 0, 0]} />
-
-
-
-
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <FileText className="w-5 h-5 text-gray-500" /> Application Status
-          </h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart
-              data={[
-                { status: 'Pending', count: stats.pendingApplications },
-                { status: 'Approved', count: stats.approvedApplications },
-                { status: 'Rejected', count: stats.rejectedApplications },
-              ]}
-              layout="vertical"
-              margin={{ top: 10, right: 20, left: 10, bottom: 0 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis type="number" tick={{ fontSize: 12 }} allowDecimals={false} />
-              <YAxis dataKey="status" type="category" tick={{ fontSize: 12 }} />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-              <Bar dataKey="count" radius={[0, 8, 8, 0]} fill="#0EA5E9" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export const SuperAdminDashboard = () => {
-  const { user } = useAuth();
-  const [stats, setStats] = useState(null);
-  const [tiers, setTiers] = useState(null);
-  const [trend, setTrend] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const [statsRes, tiersRes, trendRes] = await Promise.all([
-          api.get('/stats/super-admin'),
-          api.get('/stats/users-by-tier'),
-          api.get('/stats/applications-trend'),
-        ]);
-        setStats(statsRes.data.data);
-        setTiers(tiersRes.data.data);
-        setTrend(trendRes.data.data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
-        </div>
-      </div>
-    );
-  }
-
-  const tierPieData = tiers ? [
-    { name: 'T1', value: tiers.T1 || 0, color: '#059669', fill: '#059669' },
-    { name: 'T2', value: tiers.T2 || 0, color: '#0284C7', fill: '#0284C7' },
-    { name: 'T3', value: tiers.T3 || 0, color: '#7C3AED', fill: '#7C3AED' },
-    { name: 'Admin', value: (tiers.Admin || 0) + (tiers.SuperAdmin || 0), color: '#DC2626', fill: '#DC2626' },
-  ].filter((d) => d.value > 0) : [];
-
-  return (
-    <div className="space-y-6">
-      <AnnouncementBanner />
-      <div>
-        <h1 className="text-2xl font-bold">Welcome, {user.name}</h1>
-        <p className="text-gray-500">Full system overview and admin actions.</p>
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <Kpi label="Admins" value={stats?.admins ?? 0} />
-        <Kpi label="Total Users" value={stats?.totalUsers ?? 0} />
-        <Kpi label="Active Events" value={stats?.activeEvents ?? 0} />
-        <Kpi label="Check-ins Today" value={stats?.sessionsToday ?? 0} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 min-w-0 overflow-hidden">
-          <h3 className="font-semibold mb-4">Users by Tier</h3>
-          {tierPieData.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">No data</div>
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie data={tierPieData} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={3} dataKey="value" />
-
-
-
-
-                <Tooltip />
-                <Legend wrapperStyle={{ fontSize: '12px' }} iconType="circle" />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 min-w-0 overflow-hidden">
-          <h3 className="font-semibold mb-4">Applications (7 Days)</h3>
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={trend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="day" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-              <Bar dataKey="count" fill="#EF4444" radius={[8, 8, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 export const T1Dashboard = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -1774,14 +1202,29 @@ export const T1Dashboard = () => {
     <div className="space-y-6 max-w-2xl">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Hi {user.name.split(' ')[0]}</h1>
+        <h1 className="text-2xl font-bold">Hi {user?.name ? user.name.split(' ')[0] : 'Volunteer'}</h1>
         <p className="text-gray-500">
           {todayStatusMessage}
-
-
-
-
         </p>
+      </div>
+
+      {/* My Workforce & Timesheet Shortcut */}
+      <div className="bg-gradient-to-r from-emerald-600 to-teal-700 rounded-xl p-5 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Calendar className="w-5 h-5 text-emerald-200" />
+            <h3 className="font-bold text-base">Weekly Shifts & Day Timesheet</h3>
+          </div>
+          <p className="text-xs text-emerald-100 max-w-md">
+            Check your scheduled shifts, assigned team tasks, and log your daily work hours with overtime reporting.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/my-workforce')}
+          className="px-4 py-2 bg-white text-emerald-800 font-semibold text-xs rounded-lg shadow-sm hover:bg-emerald-50 transition shrink-0 cursor-pointer"
+        >
+          Open Schedule & Timesheet →
+        </button>
       </div>
 
       {/* Today's status card */}
@@ -1857,15 +1300,15 @@ export const T1Dashboard = () => {
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
-        <Kpi label="Applications" value={stats.myApplications} />
-        <Kpi label="Approved" value={stats.approved} />
-        <Kpi label="Certificates" value={stats.certificates} />
+        <Kpi label="Applications" value={safeStats.myApplications ?? 0} />
+        <Kpi label="Approved" value={safeStats.approved ?? 0} />
+        <Kpi label="Certificates" value={safeStats.certificates ?? 0} />
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        <Kpi label="Pending" value={stats.pending} />
-        <Kpi label="Days Attended" value={stats.attendanceDays} />
-        <Kpi label="My Teams" value={stats.myTeams} />
+        <Kpi label="Pending" value={safeStats.pending ?? 0} />
+        <Kpi label="Days Attended" value={safeStats.attendanceDays ?? 0} />
+        <Kpi label="My Teams" value={safeStats.myTeams ?? 0} />
       </div>
     </div>
   );
@@ -2358,8 +1801,15 @@ export const UserManagement = () => {
                   <option value="T1_VOLUNTEER">T1 Volunteer</option>
                   <option value="T2_ASSOCIATE">T2 Associate</option>
                   <option value="T3_EXECUTIVE">T3 Executive</option>
+                  {canManageAccess && <option value="ADMIN">Admin</option>}
                 </select>
               </div>
+              {form.role === 'ADMIN' && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-start gap-2">
+                  <Shield size={14} className="mt-0.5 flex-shrink-0" />
+                  <span>Admin accounts receive standard default administrative permissions upon creation. Custom permission overrides can be configured immediately after creation using &ldquo;Manage Permissions&rdquo;.</span>
+                </div>
+              )}
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 flex items-start gap-2">
                 <Info size={14} className="mt-0.5 flex-shrink-0" />
                 <span>Login credentials will be emailed to the user automatically.</span>
@@ -3883,12 +3333,10 @@ export const EventsPage = () => {
   const fetchData = async () => {
     try {
       const promises = [api.get('/events')];
-      if (canCreate) promises.push(api.get('/admin/users'));
       if (canApply) promises.push(api.get('/applications/me'));
 
       const results = await Promise.all(promises);
       setEvents(results[0].data.data);
-      if (canCreate) setUsers(results[1].data.data);
       if (canApply) setMyApplications(results[1].data.data);
     } catch (err) {
       console.error(err);
@@ -3898,6 +3346,13 @@ export const EventsPage = () => {
   };
 
   useEffect(() => { void fetchData(); }, []);
+
+  // Defer fetching users for Event Head selector until Create Event modal opens
+  useEffect(() => {
+    if (modal && canCreate && users.length === 0) {
+      api.get('/admin/users').then((res) => setUsers(res.data?.data || [])).catch(console.error);
+    }
+  }, [modal, canCreate, users.length]);
 
   // Open apply modal → fetch teams for this event
   const openApplyModal = async (ev) => {
@@ -6524,7 +5979,7 @@ export const AdminManagementPage = () => {
   useEffect(() => {
     (async () => {
       try {
-        const res = await api.get('/admin/users');
+        const res = await api.get('/admin/users?role=ADMIN,SUPER_ADMIN');
         // Filter to only admin-level accounts
         setAdmins((res.data.data || []).filter((u) =>
           ['ADMIN', 'SUPER_ADMIN'].includes(u.role)
@@ -6585,170 +6040,6 @@ export const AdminManagementPage = () => {
           </table>
           </div>
         )}
-      </div>
-    </div>
-  );
-};
-
-// ====================================================================
-// ANALYTICS
-// ====================================================================
-export const AnalyticsPage = () => {
-  const [stats, setStats] = useState(null);
-  const [tiers, setTiers] = useState(null);
-  const [monthly, setMonthly] = useState([]);
-  const [top, setTop] = useState([]);
-  const [attendance, setAttendance] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const [statsRes, tiersRes, monthlyRes, topRes, attendRes] = await Promise.all([
-          api.get('/stats/admin'),
-          api.get('/stats/users-by-tier'),
-          api.get('/stats/monthly-applications'),
-          api.get('/stats/top-performers'),
-          api.get('/stats/attendance'),
-        ]);
-        setStats(statsRes.data.data);
-        setTiers(tiersRes.data.data);
-        setMonthly(monthlyRes.data.data);
-        setTop(topRes.data.data);
-        setAttendance(attendRes.data.data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
-        </div>
-        <Skeleton className="h-80 rounded-xl" />
-      </div>
-    );
-  }
-
-  const tierPieData = [
-    { name: 'T1', value: tiers.T1, color: '#059669', fill: '#059669' },
-    { name: 'T2', value: tiers.T2, color: '#0284C7', fill: '#0284C7' },
-    { name: 'T3', value: tiers.T3, color: '#7C3AED', fill: '#7C3AED' },
-    { name: 'Admin', value: tiers.Admin + tiers.SuperAdmin, color: '#DC2626', fill: '#DC2626' },
-  ].filter((d) => d.value > 0);
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Analytics</h1>
-        <p className="text-gray-500">Insights and trends across the platform</p>
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi label="Total Users" value={stats.totalUsers} />
-        <Kpi label="Active Events" value={stats.activeEvents} />
-        <Kpi label="Approval Rate" value={`${stats.approvalRate}%`} />
-        <Kpi label="Today Attendance" value={attendance ? `${attendance.rate}%` : '—'} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-gray-200">
-          <h3 className="font-semibold mb-4">User Distribution</h3>
-          {tierPieData.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">No data</div>
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie data={tierPieData} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value" />
-
-
-
-
-                <Tooltip />
-                <Legend wrapperStyle={{ fontSize: '12px' }} iconType="circle" />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200 lg:col-span-2">
-          <h3 className="font-semibold mb-4">Applications — Last 12 Months</h3>
-          <ResponsiveContainer width="100%" height={260}>
-            <AreaChart data={monthly} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="colorApps" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#0EA5E9" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="#0EA5E9" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-              <Area type="monotone" dataKey="count" stroke="#0EA5E9" strokeWidth={2.5} fillOpacity={1} fill="url(#colorApps)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-gray-200">
-          <h3 className="font-semibold mb-4">Today's Attendance</h3>
-          {!attendance || attendance.total === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">No check-ins today</div>
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie
-                  data={[
-                    { name: 'Present', value: attendance.present, fill: '#10B981' },
-                    { name: 'Late', value: attendance.late, fill: '#F59E0B' },
-                    { name: 'Absent', value: attendance.absent, fill: '#EF4444' },
-                  ]}
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={90}
-                  dataKey="value"
-                  label={({ name, value }) => `${name}: ${value}`}
-                />
-
-
-
-
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200">
-          <h3 className="font-semibold mb-4">Top Performers</h3>
-          {top.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">No performance data yet</div>
-          ) : (
-            <div className="space-y-3">
-              {top.map((u, i) => (
-                <div key={u.userId} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0 ${i === 0 ? 'bg-amber-500' : i === 1 ? 'bg-gray-400' : i === 2 ? 'bg-amber-700' : 'bg-blue-500'
-                      }`}>{i + 1}</span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{u.name}</p>
-                      <p className="text-xs text-gray-500 truncate">{u.approvedCount} approved / {u.attendanceCount} days present</p>
-                    </div>
-                  </div>
-                  <div className="text-sm font-bold text-amber-600 flex-shrink-0">{u.score} pts</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
@@ -7115,23 +6406,26 @@ export const TeamsPage = () => {
   const [memberSearch, setMemberSearch] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Fetch teams + users on mount
+  // Fetch teams on mount
   useEffect(() => {
     (async () => {
       try {
-        const [teamsRes, usersRes] = await Promise.all([
-          api.get('/teams'),
-          canManage ? api.get('/admin/users') : Promise.resolve({ data: { data: [] } }),
-        ]);
-        setTeams(teamsRes.data.data);
-        setUsers(usersRes.data.data);
+        const teamsRes = await api.get('/teams');
+        setTeams(teamsRes.data?.data || []);
       } catch (err) {
         console.error(err);
       } finally {
         setLoading(false);
       }
     })();
-  }, [canManage]);
+  }, []);
+
+  // Defer fetching users until Create or Member management modals are opened
+  useEffect(() => {
+    if ((createModal || detailModal || addMemberModal) && canManage && users.length === 0) {
+      api.get('/admin/users').then((res) => setUsers(res.data?.data || [])).catch(console.error);
+    }
+  }, [createModal, detailModal, addMemberModal, canManage, users.length]);
 
   // Create team
   const createTeam = async (e) => {
@@ -7457,9 +6751,17 @@ export const MyShiftsPage = () => {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">My Shifts & Teams</h1>
-        <p className="text-gray-500">Your assigned team and event shift allocations</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">My Shifts & Teams</h1>
+          <p className="text-gray-500">Your assigned team and event shift allocations</p>
+        </div>
+        <NavLink
+          to="/my-workforce"
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg shadow-sm transition flex items-center gap-1.5 self-start sm:self-auto"
+        >
+          <Calendar size={14} /> Weekly Schedule & Timesheets →
+        </NavLink>
       </div>
 
       {loading ? (
@@ -8123,45 +7425,43 @@ export const T3DashboardEnhanced = () => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [eventsRes, statsRes] = await Promise.all([
-          api.get('/events/me'),
-          api.get('/stats/t3'),
-        ]);
-        setMyEvents(eventsRes.data.data);
-        setStats(statsRes.data.data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
   const [teamAttendance, setTeamAttendance] = useState([]);
 
   useEffect(() => {
+    let isMounted = true;
     (async () => {
       try {
-        const teamsRes = await api.get('/teams/me');
-        const list = teamsRes.data.data;
-        const withStats = await Promise.all(
-          list.map(async (t) => {
-            try {
-              const s = await api.get(`/attendance/team/stats?teamId=${t._id}`);
-              return { ...t, stats: s.data.data };
-            } catch {
-              return { ...t, stats: null };
-            }
-          })
-        );
-        setTeamAttendance(withStats);
+        const [eventsRes, statsRes, teamsRes] = await Promise.all([
+          api.get('/events/me'),
+          api.get('/stats/t3'),
+          api.get('/teams/me').catch(() => ({ data: { data: [] } })),
+        ]);
+
+        if (!isMounted) return;
+        setMyEvents(eventsRes.data?.data || []);
+        setStats(statsRes.data?.data || null);
+
+        const list = Array.isArray(teamsRes.data?.data) ? teamsRes.data.data : [];
+        if (list.length > 0) {
+          const withStats = await Promise.all(
+            list.map(async (t) => {
+              try {
+                const s = await api.get(`/attendance/team/stats?teamId=${t._id}`);
+                return { ...t, stats: s.data?.data || null };
+              } catch {
+                return { ...t, stats: null };
+              }
+            })
+          );
+          if (isMounted) setTeamAttendance(withStats);
+        }
       } catch (err) {
         console.error(err);
+      } finally {
+        if (isMounted) setLoading(false);
       }
     })();
+    return () => { isMounted = false; };
   }, []);
 
   if (loading) {
@@ -8179,8 +7479,37 @@ export const T3DashboardEnhanced = () => {
     <div className="space-y-6">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Hi {user.name.split(' ')[0]}</h1>
+        <h1 className="text-2xl font-bold">Hi {user?.name ? user.name.split(' ')[0] : 'Executive'}</h1>
         <p className="text-gray-500">Your events and pending tasks</p>
+      </div>
+
+      {/* Workforce Management Hub for T3 Lead */}
+      <div className="bg-gradient-to-r from-purple-900 to-indigo-900 text-white rounded-xl p-5 border border-purple-800 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Calendar className="w-5 h-5 text-purple-300" />
+              <h3 className="font-bold text-base">T3 Workforce Management Hub</h3>
+            </div>
+            <p className="text-xs text-purple-200 max-w-lg">
+              Manage your 7-day team shift matrix, assign inline tasks, review submitted timesheets, and approve attendance regularizations.
+            </p>
+          </div>
+          <div className="flex gap-2 flex-wrap shrink-0">
+            <button
+              onClick={() => navigate('/t3/workforce')}
+              className="px-3.5 py-2 bg-purple-500 hover:bg-purple-600 text-white font-semibold text-xs rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Calendar size={14} /> Shift Calendar & Register
+            </button>
+            <button
+              onClick={() => navigate('/t3/approvals')}
+              className="px-3.5 py-2 bg-white text-purple-900 hover:bg-purple-50 font-semibold text-xs rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <CheckCircle size={14} /> Approvals Inbox
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -8328,8 +7657,27 @@ export const T2DashboardEnhanced = () => {
     <div className="space-y-6">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Hey {user.name.split(' ')[0]}</h1>
+        <h1 className="text-2xl font-bold">Hey {user?.name ? user.name.split(' ')[0] : 'Associate'}</h1>
         <p className="text-gray-500">Here's your activity</p>
+      </div>
+
+      {/* My Workforce & Timesheet Shortcut */}
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl p-5 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Calendar className="w-5 h-5 text-blue-200" />
+            <h3 className="font-bold text-base">Weekly Shifts & Day Timesheet</h3>
+          </div>
+          <p className="text-xs text-blue-100 max-w-md">
+            View your scheduled shifts, assigned team tasks, and log your daily work hours with overtime reporting.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/my-workforce')}
+          className="px-4 py-2 bg-white text-blue-800 font-semibold text-xs rounded-lg shadow-sm hover:bg-blue-50 transition shrink-0 cursor-pointer"
+        >
+          Open Schedule & Timesheet →
+        </button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -8385,47 +7733,6 @@ export const T2DashboardEnhanced = () => {
   );
 };
 
-// ====================================================================
-// SKELETONS
-// ====================================================================
-export const Skeleton = ({ className = '' }) => (
-  <div className={`animate-pulse bg-gray-200 rounded ${className}`} />
-);
-
-export const SkeletonCard = () => (
-  <div className="bg-white p-5 rounded-xl border border-gray-200">
-    <Skeleton className="h-3 w-24 mb-3" />
-    <Skeleton className="h-8 w-20" />
-  </div>
-);
-
-export const SkeletonTable = ({ rows = 5, cols = 4 }) => (
-  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-    <div className="bg-gray-50 border-b border-gray-200 p-4 flex gap-4">
-      {Array.from({ length: cols }).map((_, i) => <Skeleton key={i} className="h-3 flex-1" />)}
-    </div>
-    {Array.from({ length: rows }).map((_, r) => (
-      <div key={r} className="p-4 flex gap-4 border-b border-gray-100 last:border-0">
-        {Array.from({ length: cols }).map((_, c) => <Skeleton key={c} className="h-4 flex-1" />)}
-      </div>
-    ))}
-  </div>
-);
-
-export const SkeletonCardGrid = ({ count = 3 }) => (
-  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-    {Array.from({ length: count }).map((_, i) => (
-      <div key={i} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <Skeleton className="h-32 rounded-none" />
-        <div className="p-5 space-y-3">
-          <Skeleton className="h-4 w-3/4" />
-          <Skeleton className="h-3 w-1/2" />
-        </div>
-      </div>
-    ))}
-  </div>
-);
-
 export const useFakeLoading = (ms = 600) => {
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -8470,16 +7777,15 @@ export const EventDetailPage = () => {
   };
 
   useEffect(() => {
-    (async () => {
-      await fetchEvent();
-      if (canAddMembers) {
-        try {
-          const res = await api.get('/admin/users');
-          setUsers(res.data.data);
-        } catch (err) { console.error(err); }
-      }
-    })();
-  }, [id, canAddMembers]);
+    void fetchEvent();
+  }, [id]);
+
+  // Defer fetching candidate users until Add Member modal or Edit modal is opened
+  useEffect(() => {
+    if ((addMemberModal || editModal) && canAddMembers && users.length === 0) {
+      api.get('/admin/users').then((res) => setUsers(res.data?.data || [])).catch(console.error);
+    }
+  }, [addMemberModal, editModal, canAddMembers, users.length]);
 
   const addMember = async (userId) => {
     setSaving(true);
@@ -8976,7 +8282,8 @@ export const ProfilePage = () => {
     }
   };
 
-  const cfg = ROLES[user.role];
+  const role = user?.role || 'T1_VOLUNTEER';
+  const cfg = ROLES[role] || ROLES.T1_VOLUNTEER;
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
@@ -8984,7 +8291,7 @@ export const ProfilePage = () => {
         <p className="text-gray-500">Manage your account information and security</p>
       </div>
 
-      {user.role === 'ADMIN' && (
+      {user?.role === 'ADMIN' && (
         <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-3 text-amber-800 text-sm">
           <Info className="w-5 h-5 text-amber-600 shrink-0" />
           <div>
@@ -8995,12 +8302,12 @@ export const ProfilePage = () => {
 
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-center gap-5">
-          <div className="w-20 h-20 rounded-full flex items-center justify-center text-white text-2xl font-bold" style={{ backgroundColor: cfg.color }}>
-            {user.name.charAt(0)}
+          <div className="w-20 h-20 rounded-full flex items-center justify-center text-white text-2xl font-bold" style={{ backgroundColor: cfg?.color || '#0B5CAD' }}>
+            {user?.name ? user.name.charAt(0) : 'U'}
           </div>
           <div className="flex-1">
-            <h2 className="text-xl font-bold">{user.name}</h2>
-            <p className="text-sm text-gray-500">{user.email}</p>
+            <h2 className="text-xl font-bold">{user?.name || 'User'}</h2>
+            <p className="text-sm text-gray-500">{user?.email || ''}</p>
             {user.userId && (
               <p className="text-xs font-mono font-bold text-gray-700 mt-1">User ID: {user.userId}</p>
             )}
@@ -9808,8 +9115,8 @@ export const ToggleSwitch = ({ checked, onChange }) => (
 // ====================================================================
 export const AddUserPage = () => {
   const navigate = useNavigate();
-
-
+  const { user: currentUser } = useAuth();
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
 
   const [form, setForm] = useState({
     name: '',
@@ -9842,6 +9149,7 @@ export const AddUserPage = () => {
     { value: 'T1_VOLUNTEER', label: 'T1 Volunteer', desc: 'Event helper, applies to shifts', icon: 'T1', color: 'bg-green-100 text-green-700 border-green-300' },
     { value: 'T2_ASSOCIATE', label: 'T2 Associate', desc: 'Team coordinator, assists T1s', icon: 'T2', color: 'bg-blue-100 text-blue-700 border-blue-300' },
     { value: 'T3_EXECUTIVE', label: 'T3 Executive', desc: 'Senior lead, manages teams', icon: 'T3', color: 'bg-purple-100 text-purple-700 border-purple-300' },
+    ...(isSuperAdmin ? [{ value: 'ADMIN', label: 'Admin', desc: 'System administrator with custom grants', icon: 'AD', color: 'bg-orange-100 text-orange-700 border-orange-300' }] : []),
   ];
 
   if (created) {
@@ -10319,7 +9627,7 @@ export const AnnouncementPopup = () => {
   useEffect(() => {
     if (!user) return;
 
-    const checkKey = `announcements_shown_${user._id}_${new Date().toDateString()}`;
+    const checkKey = `announcements_shown_${user?._id || user?.id || 'guest'}_${new Date().toDateString()}`;
     const alreadyShown = sessionStorage.getItem(checkKey);
     if (alreadyShown) return;
 

@@ -28,6 +28,7 @@ const getRefreshSecret = () => {
 const getSecretForPurpose = (purpose) => (purpose === 'refresh' ? getRefreshSecret() : getAccessSecret());
 
 exports.requiresMfa = async (role) => {
+  if (process.env.ENFORCE_MFA !== 'true') return false;
   try {
     // Relative file import: standardized for CommonJS server runtime compatibility
     const { PRIVILEGED_ROLES } = await import('../../../../../packages/shared-constants/roles.js');

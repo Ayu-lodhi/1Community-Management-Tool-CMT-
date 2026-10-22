@@ -99,7 +99,29 @@ async function connectToDatabase() {
 }
 
 export default async function handler(req, res) {
-  const url = req.url || '';
+  // Normalize request URL for Vercel rewrites and Express routing
+  let effectiveUrl = req.url || '';
+  const matchedPath = req.headers?.['x-matched-path'] || req.headers?.['x-original-url'] || req.headers?.['x-forwarded-uri'];
+  if (matchedPath && (matchedPath.startsWith('/api') || matchedPath.startsWith('/health'))) {
+    effectiveUrl = matchedPath;
+  } else {
+    try {
+      const parsed = new URL(req.url, 'http://localhost');
+      const rewrittenPath = parsed.searchParams.get('__url');
+      if (rewrittenPath) {
+        parsed.searchParams.delete('__url');
+        const remainingQuery = parsed.searchParams.toString();
+        effectiveUrl = '/api/' + rewrittenPath + (remainingQuery ? '?' + remainingQuery : '');
+      }
+    } catch (_) {}
+  }
+
+  if (effectiveUrl && !effectiveUrl.startsWith('/api') && effectiveUrl.startsWith('/v1')) {
+    effectiveUrl = '/api' + effectiveUrl;
+  }
+
+  req.url = effectiveUrl;
+  const url = effectiveUrl;
 
   // 1. Health check endpoint — works unconditionally even if initError occurred
   if (
@@ -151,12 +173,7 @@ export default async function handler(req, res) {
   // 3. Connect to database lazily before routing request
   await connectToDatabase();
 
-  // 4. Normalize URL path for Express router if needed
-  if (req.url && !req.url.startsWith('/api') && req.url.startsWith('/v1')) {
-    req.url = '/api' + req.url;
-  }
-
-  // 5. Delegate request to Express app
+  // 4. Delegate request to Express app
   try {
     return app(req, res);
   } catch (err) {
