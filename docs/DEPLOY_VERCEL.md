@@ -22,7 +22,7 @@ Configure the following variables in Vercel Project Settings > Environment Varia
 ### Required (Backend Serverless Function)
 | Variable | Description | Example / Notes |
 | :--- | :--- | :--- |
-| `MONGODB_URI` | MongoDB connection string | `mongodb+srv://user:pass@cluster.mongodb.net/cmt_prod?retryWrites=true&w=majority` |
+| `MONGODB_URI` | MongoDB connection string | `mongodb+srv://<cluster-host>/cmt_prod?retryWrites=true&w=majority` |
 | `JWT_ACCESS_SECRET` | Secret key for access token signing | Minimum 32 random characters |
 | `JWT_REFRESH_SECRET` | Secret key for refresh token signing | Minimum 32 random characters (must differ from `JWT_ACCESS_SECRET`) |
 

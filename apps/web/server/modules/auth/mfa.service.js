@@ -6,7 +6,7 @@ const getOtplib = async () => {
 };
 
 const encryptionKey = () => {
-  const key = process.env.MFA_ENCRYPTION_KEY || '4a09e55da348c11d7a876c866488955a18c08b9934e735e1f335b6fd2775fe76';
+  const key = process.env.MFA_ENCRYPTION_KEY || (process.env.NODE_ENV !== 'production' ? '4a09e55da348c11d7a876c866488955a18c08b9934e735e1f335b6fd2775fe76' : null);
   if (!/^[a-f\d]{64}$/i.test(key || '')) throw new Error('MFA encryption key is not configured');
   return Buffer.from(key, 'hex');
 };

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useAuth } from '../../pages';
+import { useAuth } from '../../context/AuthContext';
 import api from '../../api';
 import {
   User, Mail, Phone, MapPin, Briefcase, GraduationCap, Award,

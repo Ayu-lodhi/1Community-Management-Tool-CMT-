@@ -1,62 +1,44 @@
 // Middleware: verifyCaptcha.js
-// Verifies Google reCAPTCHA v2 token server-side.
-// Controlled by CAPTCHA_ENABLED env flag — set to 'false' to bypass (e.g., in tests).
+// Verifies and atomically consumes self-hosted alphanumeric CAPTCHA from MongoDB.
+// Bypass by setting CAPTCHA_ENABLED='false' (e.g. for testing environments).
 
-const RECAPTCHA_VERIFY_URL = 'https://www.google.com/recaptcha/api/siteverify';
+const Captcha = require('../models/Captcha.model');
 
 const verifyCaptcha = async (req, res, next) => {
-  // Bypass only if CAPTCHA is not explicitly enabled
-  if (process.env.CAPTCHA_ENABLED !== 'true') {
+  // Bypass only if CAPTCHA is explicitly disabled
+  if (process.env.CAPTCHA_ENABLED === 'false') {
     return next();
   }
 
-  // Fail closed if CAPTCHA is enabled but secret key is missing / placeholder
-  const hasValidSecret =
-    process.env.RECAPTCHA_SECRET_KEY &&
-    process.env.RECAPTCHA_SECRET_KEY !== 'REPLACE_WITH_YOUR_RECAPTCHA_SECRET_KEY';
+  const captchaId = req.body.captchaId;
+  const captchaAnswer = req.body.captchaAnswer;
 
-  if (!hasValidSecret) {
-    return res.status(500).json({
-      success: false,
-      message: 'Server configuration error: CAPTCHA is enabled but no valid secret key is provided.',
-    });
-  }
-
-  const token = req.body['g-recaptcha-response'];
-
-  if (!token) {
+  if (!captchaId || !captchaAnswer) {
     return res.status(400).json({
       success: false,
-      message: 'CAPTCHA verification is required. Please complete the CAPTCHA.',
+      message: 'CAPTCHA verification is required. Please enter the code shown.',
     });
   }
 
   try {
-    const params = new URLSearchParams({
-      secret: process.env.RECAPTCHA_SECRET_KEY || '',
-      response: token,
-      remoteip: req.ip || req.headers['x-forwarded-for'] || '',
+    const normalized = String(captchaAnswer).trim().toUpperCase();
+    const match = await Captcha.findOneAndDelete({
+      _id: captchaId,
+      code: normalized,
     });
 
-    const verifyRes = await fetch(`${RECAPTCHA_VERIFY_URL}?${params.toString()}`, {
-      method: 'POST',
-    });
-
-    const data = await verifyRes.json();
-
-    if (!data.success) {
+    if (!match) {
       return res.status(400).json({
         success: false,
-        message: 'CAPTCHA verification failed. Please try again.',
+        message: 'Invalid or expired CAPTCHA code. Please click refresh and try again.',
       });
     }
 
     next();
   } catch (err) {
-    // Never log or expose the secret key
-    return res.status(500).json({
+    return res.status(400).json({
       success: false,
-      message: 'CAPTCHA service is temporarily unavailable. Please try again.',
+      message: 'Invalid or expired CAPTCHA. Please refresh and try again.',
     });
   }
 };

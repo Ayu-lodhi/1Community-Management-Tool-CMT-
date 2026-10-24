@@ -2,7 +2,8 @@ const adminService = require('./admin.service');
 
 exports.getUsers = async (req, res) => {
   try {
-    const users = await adminService.getAllUsers();
+    const { role, limit, page } = req.query;
+    const users = await adminService.getAllUsers({ role, limit, page });
     res.status(200).json({ success: true, data: users });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -17,14 +18,16 @@ exports.addUser = async (req, res) => {
         message: 'Only Super Admins can create Super Admin or Admin accounts',
       });
     }
-    const { user, emailDelivery } = await adminService.createUser(req.body, req.user?.role);
-    const message = emailDelivery && !emailDelivery.sent
-      ? 'User created, but welcome email could not be delivered.'
-      : 'User created. Credentials sent via email.';
+    const { user, emailDelivery, emailSent: sentFlag } = await adminService.createUser(req.body, req.user?.role);
+    const emailSent = emailDelivery ? emailDelivery.sent : sentFlag;
+    const message = emailSent
+      ? 'User created. Credentials sent via email.'
+      : 'User created, but welcome email could not be delivered.';
     res.status(201).json({
       success: true,
       message,
       data: user,
+      emailSent,
     });
   } catch (error) {
     const isExpected =
@@ -94,7 +97,7 @@ exports.deleteUser = async (req, res) => {
     await adminService.deleteUser(req.params.id, req.user.sub);
     res.status(200).json({ success: true, message: 'User deleted' });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    res.status(error.statusCode || error.status || 400).json({ success: false, message: error.message });
   }
 };
 
@@ -198,7 +201,7 @@ exports.resetUserSession = async (req, res) => {
 
 exports.updateUserRole = async (req, res) => {
   try {
-    const { role } = req.body;
+    const { role, reason } = req.body;
     if (!role) {
       return res.status(400).json({ success: false, message: 'Role is required' });
     }
@@ -206,11 +209,12 @@ exports.updateUserRole = async (req, res) => {
       req.params.id,
       role,
       req.user,
-      req.ip || req.headers['x-forwarded-for']
+      req.ip || req.headers['x-forwarded-for'],
+      reason
     );
     res.status(200).json({ success: true, message: 'User role updated', data: result });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    res.status(error.statusCode || error.status || 400).json({ success: false, message: error.message });
   }
 };
 

@@ -32,20 +32,21 @@ app.set('trust proxy', /^\d+$/.test(trustProxyConfig) ? parseInt(trustProxyConfi
 const isAllowedOrigin = (origin) => {
   if (!origin) return true;
   if (process.env.ALLOWED_ORIGINS) {
-    const list = process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim());
+    const list = process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean);
     if (list.includes(origin)) return true;
   }
-  if (/^https:\/\/.*\.vercel\.app$/.test(origin)) return true;
-  return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  if (process.env.CLIENT_URL && origin === process.env.CLIENT_URL) return true;
+  if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) return true;
+  if (process.env.VERCEL && origin.endsWith('.vercel.app')) return true;
+  if (process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+    return true;
+  }
+  return false;
 };
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (isAllowedOrigin(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('CORS not allowed for origin: ' + origin));
-    }
+    callback(null, isAllowedOrigin(origin));
   },
   credentials: true,
 }));
@@ -79,7 +80,9 @@ app.use('/api/v1/stats', require('./modules/stats/stats.routes'));
 app.use('/api/v1/preferences', require('./modules/users/preferences.routes'));
 app.use('/api/v1/announcements', require('./modules/announcements/announcements.routes'));
 app.use('/api/v1/timesheets', require('./modules/timesheets/timesheets.routes'));
+app.use('/api/v1/workforce', require('./modules/workforce/workforce.routes'));
 app.use('/api/v1/profile', require('./modules/profile/profile.routes'));
+app.use('/api/v1/hr', require('./modules/hr/hr.routes'));
 app.patch('/api/v1/admin/users/:userId/tier', protect, restrictTo('ADMIN', 'SUPER_ADMIN'), createUserLimiter, require('./modules/profile/profile.controller').updateUserTier);
 
 app.get('/', publicCache(120), (req, res) => {

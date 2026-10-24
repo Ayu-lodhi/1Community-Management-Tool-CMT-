@@ -157,7 +157,7 @@ const issueSession = (user, isMfaVerified, sessionId) => {
       passwordChangeToken: tokens.sign(user, 'password-change', remaining, { isMfaVerified, sid }),
     };
   }
-  const accessToken = tokens.sign(user, 'access', process.env.JWT_ACCESS_EXPIRY || '15m', {
+  const accessToken = tokens.sign(user, 'access', process.env.JWT_ACCESS_EXPIRY || '30m', {
     role: user.role, isMfaVerified, sid,
   });
   const refreshToken = tokens.sign(user, 'refresh', process.env.JWT_REFRESH_EXPIRY || '7d', { sid });

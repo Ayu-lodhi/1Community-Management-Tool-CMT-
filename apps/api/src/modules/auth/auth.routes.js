@@ -4,6 +4,7 @@ const authController = require('./auth.controller');
 const { protect, protectPasswordChange } = require('./auth.middleware');
 
 router.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+router.get('/captcha', authController.getCaptcha);
 const verifyCaptcha = require('../../middleware/verifyCaptcha');
 router.post('/login', verifyCaptcha, authController.login);
 router.post('/mfa/verify', authController.verifyMfa);

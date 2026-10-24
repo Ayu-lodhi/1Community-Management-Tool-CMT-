@@ -357,3 +357,31 @@ test('9. Users B and C stay logged in when user A logs out', async () => {
     cleanup();
   }
 });
+
+// 10. Forced password change login returns passwordChangeToken and neither user nor accessToken
+test('10. Forced password change login returns passwordChangeToken and neither user nor accessToken', async () => {
+  const { getUser, cleanup } = setupMockUsers();
+  try {
+    const user = getUser('userA@example.com');
+    user.mustChangePassword = true;
+    user.passwordChangeStartedAt = null;
+
+    const origConsume = repository.consumeTemporaryPassword;
+    repository.consumeTemporaryPassword = async (u) => {
+      u.passwordChangeStartedAt = new Date();
+      return u;
+    };
+
+    try {
+      const loginRes = await authService.login('userA@example.com', 'password');
+      assert.strictEqual(loginRes.mustChangePassword, true);
+      assert.ok(loginRes.passwordChangeToken, 'must return passwordChangeToken');
+      assert.strictEqual(loginRes.user, undefined, 'must NOT return user');
+      assert.strictEqual(loginRes.accessToken, undefined, 'must NOT return accessToken');
+    } finally {
+      repository.consumeTemporaryPassword = origConsume;
+    }
+  } finally {
+    cleanup();
+  }
+});
