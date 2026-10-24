@@ -93,6 +93,7 @@ class AttendanceService {
       record = await Attendance.findOneAndUpdate(
         { studentId, teamId, date: targetDate },
         {
+          user: studentId,
           studentId,
           studentName: student.name,
           studentEmail: student.email,
@@ -181,6 +182,7 @@ class AttendanceService {
     const record = await Attendance.findOneAndUpdate(
       { studentId: user.sub, teamId, date: targetDate },
       {
+        user: user.sub,
         studentId: user.sub,
         studentName: userDoc.name,
         studentEmail: userDoc.email,

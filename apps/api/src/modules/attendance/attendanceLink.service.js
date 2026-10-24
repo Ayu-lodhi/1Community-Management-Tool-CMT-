@@ -269,7 +269,7 @@ class AttendanceLinkService {
   /**
    * 2. Mark attendance (Strictly on POST request)
    */
-  async markAttendance(token, user, body = {}) {
+  async markAttendance(token, user, body = {}, ipAddress = null) {
     const linkQuery = AttendanceLink.findOne({ token });
     const link = typeof linkQuery.select === 'function' ? await linkQuery.select('+secret') : await linkQuery;
     if (!link) {
@@ -368,6 +368,7 @@ class AttendanceLinkService {
           performedByName: user.name || user.email || 'T3 Member',
           token: link.token,
           team: link.team,
+          ipAddress,
           details: {
             reason: 'outside_radius',
             distanceM: Math.round(calculatedDistance / 10) * 10,
@@ -562,7 +563,8 @@ class AttendanceLinkService {
     return {
       date: todayDate,
       timeZone: 'Asia/Kolkata',
-      presentCount: presentMembers.length,
+      presentCount: presentUserIds.size,
+      totalCheckIns: presentMembers.length,
       absentCount: absentMembers.length,
       totalCount: allT3Users.length,
       presentMembers,

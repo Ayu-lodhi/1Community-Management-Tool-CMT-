@@ -4456,6 +4456,11 @@ export const AttendancePage = () => {
     e?.preventDefault();
     setGenerating(true);
     setGenError('');
+    if (geoEnabled && !venueCoords) {
+      setGenError('Please wait for GPS venue coordinates to be acquired before generating a geofenced session.');
+      setGenerating(false);
+      return;
+    }
     try {
       const payload = {
         minutes: durationMinutes,
@@ -5084,7 +5089,14 @@ export const AttendancePage = () => {
                           {m.name.charAt(0)}
                         </div>
                         <div>
-                          <p className="text-xs font-bold text-slate-800">{m.name}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-xs font-bold text-slate-800">{m.name}</p>
+                            {m.sessionLabel && (
+                              <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium">
+                                {m.sessionLabel}
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[11px] text-gray-400">{m.email}</p>
                         </div>
                       </div>
@@ -5552,8 +5564,8 @@ export const AttendPage = () => {
     let payload = {};
 
     if (linkInfo?.rolling?.enabled) {
-      if (!inputCode.trim()) {
-        setError('Please enter the 6-character session code shown on the screen.');
+      if (!inputCode.trim() || inputCode.trim().length !== 6) {
+        setError('Please enter the full 6-character session code shown on the screen.');
         setMarking(false);
         return;
       }

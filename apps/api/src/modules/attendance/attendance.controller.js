@@ -149,7 +149,8 @@ exports.getRollingCode = async (req, res) => {
 
 exports.markLinkAttendance = async (req, res) => {
   try {
-    const record = await linkService.markAttendance(req.params.token, req.user, req.body);
+    const clientIp = req.ip || req.headers['x-forwarded-for'] || null;
+    const record = await linkService.markAttendance(req.params.token, req.user, req.body, clientIp);
     res.status(201).json({ success: true, message: 'Attendance marked successfully', data: record });
   } catch (err) {
     handleAttendanceError(res, err);

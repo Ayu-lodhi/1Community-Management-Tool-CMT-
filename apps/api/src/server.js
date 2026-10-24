@@ -115,6 +115,10 @@ if (mongoose.connection.readyState === 0 && MONGODB_URI) {
     .connect(MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
     .then(async () => {
       console.log('MongoDB Connected');
+      try {
+        const Attendance = require('./modules/attendance/attendance.model');
+        await Attendance.collection.dropIndex('user_1_date_1').catch(() => {});
+      } catch (_) {}
       if (process.env.AUTO_SYNC_INDEXES === 'true') {
         try {
           const Attendance = require('./modules/attendance/attendance.model');

@@ -229,6 +229,7 @@ class ApplicationService {
           Attendance.findOneAndUpdate(
             { studentId: app.studentId, teamId: app.teamId, date: targetDate },
             {
+              user: app.studentId,
               studentId: app.studentId,
               studentName: app.studentName,
               studentEmail: app.studentEmail,

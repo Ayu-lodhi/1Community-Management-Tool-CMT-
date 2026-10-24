@@ -347,6 +347,8 @@ test('QR Geofencing, Rolling Code & Multi-Session', { concurrency: 1 }, async (t
     assert.ok(s1 && s2, 'Both sessions found in panel');
     assert.equal(s1.presentCount, 1, 'Session 1 has 1 present member');
     assert.equal(s2.presentCount, 1, 'Session 2 has 1 present member');
+    assert.equal(panel.presentCount, 1, 'Overall unique present count must be 1, not 2');
+    assert.equal(panel.totalCheckIns, 2, 'Total check-ins across sessions is 2');
   });
 
   // 6. Security: No secret or venue coordinates leaked in student getLinkInfo
@@ -372,5 +374,124 @@ test('QR Geofencing, Rolling Code & Multi-Session', { concurrency: 1 }, async (t
     assert.equal(info.geo.lng, undefined, 'Venue longitude must not be leaked');
     assert.equal(info.geo.radiusM, 100, 'Radius threshold is safe to display');
     assert.equal(info.rolling.enabled, true, 'Rolling indicator is present');
+  });
+
+  // 7. Schema Integrity: findOneAndUpdate hook mirrors studentId and user
+  await t.test('Schema Integrity: findOneAndUpdate mirrors studentId and user', () => {
+    const updateObj = { studentId: '507f1f77bcf86cd799439001' };
+    const fakeQuery = {
+      getUpdate: () => updateObj,
+    };
+
+    // Find the findOneAndUpdate middleware function registered on schema
+    const hook = Attendance.schema.s.hooks._pres.get('findOneAndUpdate');
+    assert.ok(hook && hook.length > 0, 'findOneAndUpdate pre-hook must be registered');
+    hook[0].fn.call(fakeQuery);
+
+    assert.equal(updateObj.user, '507f1f77bcf86cd799439001', 'user must be auto-populated from studentId');
+  });
+
+  // 8. Schema Integrity: unique compound index uses partialFilterExpression
+  await t.test('Schema Integrity: { user: 1, date: 1, linkId: 1 } has partialFilterExpression', () => {
+    const indexes = Attendance.schema.indexes();
+    const compound = indexes.find(
+      (idx) => idx[0].user === 1 && idx[0].date === 1 && idx[0].linkId === 1
+    );
+    assert.ok(compound, 'Index on user, date, linkId must exist');
+    assert.equal(compound[1].unique, true, 'Index must be unique');
+    assert.deepEqual(
+      compound[1].partialFilterExpression,
+      { user: { $exists: true, $type: 'objectId' } },
+      'Must have partialFilterExpression on user objectId to avoid null collisions'
+    );
+  });
+
+  // 9. Forensics: Client IP is forwarded to audit logger on geofence rejection
+  await t.test('Forensics: client IP address is logged on geo rejection', async () => {
+    const store = createStore();
+    setupMocks(store);
+
+    const t3Lead = { sub: '507f1f77bcf86cd799439001', name: 'Lead', role: 'T3_EXECUTIVE' };
+    const farUser = { sub: '507f1f77bcf86cd799439003', name: 'Member Far', role: 'T3_EXECUTIVE' };
+    store.users.set(t3Lead.sub, t3Lead);
+    store.users.set(farUser.sub, farUser);
+
+    const link = await linkService.generateLink({
+      minutes: 15,
+      geo: { enabled: true, lat: 12.971598, lng: 77.594566, radiusM: 100 },
+    }, t3Lead);
+
+    // Spy on logger.info to capture audit data
+    const { logger } = require('../core/utils/logger');
+    const origInfo = logger.info;
+    let capturedAudit = null;
+    logger.info = (msg, data) => {
+      if (msg.includes('geo_reject')) {
+        capturedAudit = data;
+      }
+      return origInfo.call(logger, msg, data);
+    };
+
+    try {
+      await assert.rejects(
+        () => linkService.markAttendance(
+          link.token,
+          farUser,
+          { lat: 12.976000, lng: 77.594566, accuracy: 15 },
+          '198.51.100.42'
+        ),
+        (err) => err.statusCode === 403
+      );
+
+      assert.ok(capturedAudit, 'Geo reject audit must be recorded');
+      assert.equal(capturedAudit.ipAddress, '198.51.100.42', 'Client IP must be passed to audit payload');
+    } finally {
+      logger.info = origInfo;
+    }
+  });
+
+  // 10. Service Integration: selfCheckIn sets user field on findOneAndUpdate
+  await t.test('Service Integration: selfCheckIn sets user on findOneAndUpdate', async () => {
+    const attendanceService = require('../modules/attendance/attendance.service');
+    const Team = require('../modules/teams/teams.model');
+
+    const origTeamFindById = Team.findById;
+    const origAttFindOne = Attendance.findOne;
+    const origAttFindOneAndUpdate = Attendance.findOneAndUpdate;
+    const origUserFindById = User.findById;
+
+    let capturedUpsertDoc = null;
+    try {
+      Team.findById = () => Promise.resolve({
+        _id: '507f1f77bcf86cd799439010',
+        name: 'Alpha Team',
+        members: ['507f1f77bcf86cd799439020'],
+      });
+      Attendance.findOne = () => Promise.resolve(null);
+      User.findById = () => ({
+        select: () => Promise.resolve({ name: 'Student 1', email: 's1@test.com' }),
+      });
+      Attendance.findOneAndUpdate = (filter, update) => {
+        capturedUpsertDoc = update;
+        return Promise.resolve({ _id: 'rec_1', ...update });
+      };
+
+      await attendanceService.selfCheckIn(
+        { sub: '507f1f77bcf86cd799439020' },
+        { teamId: '507f1f77bcf86cd799439010' }
+      );
+
+      assert.ok(capturedUpsertDoc, 'findOneAndUpdate must be called');
+      assert.equal(
+        capturedUpsertDoc.user,
+        '507f1f77bcf86cd799439020',
+        'user must be explicitly populated with student ID'
+      );
+    } finally {
+      Team.findById = origTeamFindById;
+      Attendance.findOne = origAttFindOne;
+      Attendance.findOneAndUpdate = origAttFindOneAndUpdate;
+      User.findById = origUserFindById;
+    }
   });
 });

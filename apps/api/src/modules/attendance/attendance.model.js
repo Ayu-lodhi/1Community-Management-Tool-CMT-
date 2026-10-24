@@ -56,7 +56,7 @@ const attendanceSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
-// Auto-sync user and studentId before validation
+// Auto-sync user and studentId before validation and on findOneAndUpdate
 attendanceSchema.pre('validate', function (next) {
   if (this.user && !this.studentId) {
     this.studentId = this.user;
@@ -70,8 +70,19 @@ attendanceSchema.pre('validate', function (next) {
   next();
 });
 
+attendanceSchema.pre('findOneAndUpdate', function () {
+  const update = this.getUpdate();
+  if (update) {
+    if (update.studentId && !update.user) update.user = update.studentId;
+    if (update.user && !update.studentId) update.studentId = update.user;
+  }
+});
+
 // Compound index on { user: 1, date: 1, linkId: 1 } and sparse { user: 1, linkId: 1 } for multi-session support
-attendanceSchema.index({ user: 1, date: 1, linkId: 1 }, { unique: true });
+attendanceSchema.index(
+  { user: 1, date: 1, linkId: 1 },
+  { unique: true, partialFilterExpression: { user: { $exists: true, $type: 'objectId' } } }
+);
 attendanceSchema.index({ user: 1, linkId: 1 }, { unique: true, sparse: true });
 attendanceSchema.index({ studentId: 1, teamId: 1, date: 1 }, { sparse: true });
 attendanceSchema.index({ teamId: 1, date: 1 });
