@@ -543,8 +543,21 @@ class AttendanceLinkService {
         email: u.email,
       }));
 
+    const attendeesByLinkId = new Map();
+    for (const a of attendanceList) {
+      if (a.linkId) {
+        const key = String(a.linkId);
+        let list = attendeesByLinkId.get(key);
+        if (!list) {
+          list = [];
+          attendeesByLinkId.set(key, list);
+        }
+        list.push(a);
+      }
+    }
+
     const sessions = todayLinks.map((l) => {
-      const attendeesForSession = attendanceList.filter((a) => a.linkId && String(a.linkId) === String(l._id));
+      const attendeesForSession = attendeesByLinkId.get(String(l._id)) || [];
       return {
         id: l._id,
         token: l.token,

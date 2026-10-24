@@ -112,7 +112,12 @@ console.log('Connecting to MongoDB...');
 const MONGODB_URI = process.env.MONGODB_URI;
 if (mongoose.connection.readyState === 0 && MONGODB_URI) {
   mongoose
-    .connect(MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
+    .connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 10000,
+      maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE || '100', 10),
+      minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE || '10', 10),
+      waitQueueTimeoutMS: 5000,
+    })
     .then(async () => {
       console.log('MongoDB Connected');
       try {
