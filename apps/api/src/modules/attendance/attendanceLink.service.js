@@ -6,6 +6,8 @@ const Attendance = require('./attendance.model');
 const User = require('../admin/admin.model');
 const AuditLog = require('../../models/AuditLog.model');
 const { logger } = require('../../core/utils/logger');
+const { calculateHaversineDistance } = require('./distance.util');
+const { generateStepCode, verifyStepCode } = require('./rollingCode.util');
 
 async function recordAttendanceAudit({ action, performedBy, performedByName, token, team, details = {}, ipAddress = null }) {
   const tokenPrefix = token ? `${String(token).slice(0, 8)}...` : null;
@@ -62,7 +64,7 @@ class AttendanceLinkService {
   /**
    * 1. Generate link and QR code for T3
    */
-  async generateLink({ minutes = 10 }, user) {
+  async generateLink({ minutes = 10, sessionLabel = '', geo = null, rolling = null }, user) {
     let validMinutes = parseInt(minutes, 10);
     if (isNaN(validMinutes) || validMinutes < 1) validMinutes = 10;
     if (validMinutes > 120) validMinutes = 120; // Max 120 minutes
@@ -71,6 +73,35 @@ class AttendanceLinkService {
     const startsAt = new Date();
     const expiresAt = new Date(startsAt.getTime() + validMinutes * 60 * 1000);
     const date = getTodayKolkata();
+
+    // Optional geofencing configuration (Default radius 100m; options: 30m, 50m, 100m)
+    let geoConfig = { enabled: false, lat: null, lng: null, radiusM: 100, maxAccuracyM: 100 };
+    if (geo && (geo.enabled === true || geo.enabled === 'true')) {
+      const lat = parseFloat(geo.lat);
+      const lng = parseFloat(geo.lng);
+      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        const err = new Error('Valid latitude (-90 to 90) and longitude (-180 to 180) are required when geofencing is enabled');
+        err.statusCode = 400;
+        throw err;
+      }
+      let radiusM = parseInt(geo.radiusM, 10);
+      if (![30, 50, 100].includes(radiusM)) {
+        radiusM = 100; // Default to 100m
+      }
+      let maxAccuracyM = parseInt(geo.maxAccuracyM, 10);
+      if (isNaN(maxAccuracyM) || maxAccuracyM < 10) maxAccuracyM = 100;
+      geoConfig = { enabled: true, lat, lng, radiusM, maxAccuracyM };
+    }
+
+    // Optional rolling code configuration
+    let rollingConfig = { enabled: false, stepSeconds: 30 };
+    let secret = null;
+    if (rolling && (rolling.enabled === true || rolling.enabled === 'true')) {
+      let stepSeconds = parseInt(rolling.stepSeconds, 10);
+      if (isNaN(stepSeconds) || stepSeconds < 15 || stepSeconds > 120) stepSeconds = 30;
+      rollingConfig = { enabled: true, stepSeconds };
+      secret = crypto.randomBytes(32).toString('hex');
+    }
 
     const baseUrl = process.env.BASE_URL || process.env.APP_URL || process.env.FRONTEND_URL || 'http://localhost:5173';
     const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
@@ -93,6 +124,10 @@ class AttendanceLinkService {
       startsAt,
       expiresAt,
       date,
+      sessionLabel: sessionLabel ? sessionLabel.trim() : '',
+      geo: geoConfig,
+      rolling: rollingConfig,
+      secret,
       active: true,
     });
 
@@ -106,6 +141,10 @@ class AttendanceLinkService {
         validMinutes,
         startsAt: link.startsAt,
         expiresAt: link.expiresAt,
+        sessionLabel: link.sessionLabel || '',
+        geoEnabled: link.geo?.enabled || false,
+        radiusM: link.geo?.radiusM || null,
+        rollingEnabled: link.rolling?.enabled || false,
       },
     });
 
@@ -118,6 +157,16 @@ class AttendanceLinkService {
       validMinutes,
       date: link.date,
       team: link.team,
+      sessionLabel: link.sessionLabel || '',
+      geo: link.geo?.enabled ? {
+        enabled: true,
+        radiusM: link.geo.radiusM,
+        maxAccuracyM: link.geo.maxAccuracyM,
+      } : { enabled: false },
+      rolling: link.rolling?.enabled ? {
+        enabled: true,
+        stepSeconds: link.rolling.stepSeconds,
+      } : { enabled: false },
       active: link.active,
     };
   }
@@ -146,10 +195,9 @@ class AttendanceLinkService {
       (link.team === 'T3' && (role === 'T3_EXECUTIVE' || role === 'T3')) ||
       (user?.team && user.team.toUpperCase() === link.team.toUpperCase());
 
-    const todayDate = link.date;
     const existing = await Attendance.findOne({
       user: user?.sub || user?._id,
-      date: todayDate,
+      linkId: link._id,
     });
 
     return {
@@ -164,14 +212,66 @@ class AttendanceLinkService {
       alreadyMarked: !!existing,
       markedAt: existing?.markedAt || null,
       createdByName: link.createdBy?.name || 'T3 Member',
+      sessionLabel: link.sessionLabel || '',
+      geo: link.geo?.enabled ? {
+        enabled: true,
+        radiusM: link.geo.radiusM,
+        maxAccuracyM: link.geo.maxAccuracyM,
+      } : { enabled: false },
+      rolling: link.rolling?.enabled ? {
+        enabled: true,
+        stepSeconds: link.rolling.stepSeconds,
+      } : { enabled: false },
+    };
+  }
+
+  /**
+   * Get live rolling code and seconds remaining (T3 Lead/Admin only)
+   */
+  async getRollingCode(token, user) {
+    const linkQuery = AttendanceLink.findOne({ token });
+    const link = typeof linkQuery.select === 'function' ? await linkQuery.select('+secret') : await linkQuery;
+    if (!link) {
+      const err = new Error('Invalid attendance link');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const userId = (user?.sub || user?._id || '').toString();
+    const isOwner = link.createdBy && link.createdBy.toString() === userId;
+    const isAdmin = user && ['ADMIN', 'SUPER_ADMIN'].includes(user.role);
+
+    if (!isOwner && !isAdmin) {
+      const err = new Error('Access denied. Only link creator or admin can view rolling code.');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    if (!link.rolling?.enabled || !link.secret) {
+      const err = new Error('Rolling code is not enabled for this attendance session');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const stepSeconds = link.rolling.stepSeconds || 30;
+    const now = Date.now();
+    const code = generateStepCode(link.secret, link.token, stepSeconds, now);
+    const stepMs = stepSeconds * 1000;
+    const secondsRemaining = Math.max(1, Math.ceil((stepMs - (now % stepMs)) / 1000));
+
+    return {
+      code,
+      secondsRemaining,
+      stepSeconds,
     };
   }
 
   /**
    * 2. Mark attendance (Strictly on POST request)
    */
-  async markAttendance(token, user) {
-    const link = await AttendanceLink.findOne({ token });
+  async markAttendance(token, user, body = {}) {
+    const linkQuery = AttendanceLink.findOne({ token });
+    const link = typeof linkQuery.select === 'function' ? await linkQuery.select('+secret') : await linkQuery;
     if (!link) {
       const err = new Error('Invalid attendance link');
       err.statusCode = 404;
@@ -206,20 +306,108 @@ class AttendanceLinkService {
       throw err;
     }
 
-    // 4. Already marked today check
+    // 4. Validate Rolling Code (if enabled)
+    if (link.rolling?.enabled) {
+      const candidateCode = body.code;
+      if (!candidateCode || typeof candidateCode !== 'string') {
+        const err = new Error('Session code is required for this attendance link');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const isValidCode = verifyStepCode(
+        candidateCode,
+        link.secret,
+        link.token,
+        link.rolling.stepSeconds || 30,
+        now.getTime()
+      );
+
+      if (!isValidCode) {
+        const err = new Error('Invalid or expired session code');
+        err.statusCode = 403;
+        throw err;
+      }
+    }
+
+    // 5. Validate Geolocation (if enabled)
+    let calculatedDistance = null;
+    let roundedDistance = null;
+    let accuracyM = null;
+    if (link.geo?.enabled) {
+      const lat = parseFloat(body.lat);
+      const lng = parseFloat(body.lng);
+      const accuracy = parseFloat(body.accuracy);
+
+      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        const err = new Error('Valid location coordinates are required to mark attendance');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      if (isNaN(accuracy) || accuracy < 0) {
+        const err = new Error('Location accuracy information is required');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const maxAcc = link.geo.maxAccuracyM || 100;
+      if (accuracy > maxAcc) {
+        const err = new Error(`Location accuracy is insufficient (±${Math.round(accuracy)}m). Please move near a window or outdoors and retry.`);
+        err.statusCode = 422;
+        throw err;
+      }
+
+      calculatedDistance = calculateHaversineDistance(lat, lng, link.geo.lat, link.geo.lng);
+      const allowedRadius = link.geo.radiusM || 100;
+
+      if (calculatedDistance > allowedRadius) {
+        await recordAttendanceAudit({
+          action: 'ATTENDANCE_SESSION_GEO_REJECT',
+          performedBy: user.sub || user._id,
+          performedByName: user.name || user.email || 'T3 Member',
+          token: link.token,
+          team: link.team,
+          details: {
+            reason: 'outside_radius',
+            distanceM: Math.round(calculatedDistance / 10) * 10,
+            allowedRadiusM: allowedRadius,
+            accuracyM: Math.round(accuracy),
+          },
+        });
+        const err = new Error('You are outside the designated attendance venue. If you are present, please request manual registration from your T3 executive.');
+        err.statusCode = 403;
+        throw err;
+      }
+
+      roundedDistance = Math.round(calculatedDistance / 10) * 10;
+      accuracyM = Math.round(accuracy);
+    }
+
+    // 6. Already marked check for this specific session link
     const todayDate = link.date || getTodayKolkata();
     const existing = await Attendance.findOne({
       user: user.sub || user._id,
-      date: todayDate,
+      linkId: link._id,
     });
 
     if (existing) {
-      const err = new Error('Attendance already marked for today');
+      const err = new Error('Attendance already marked for this session');
       err.statusCode = 409;
       throw err;
     }
 
-    // 5. Save attendance record
+    // 7. Determine verification method
+    let method = 'link';
+    if (link.rolling?.enabled && link.geo?.enabled) {
+      method = 'qr_rolling_geo';
+    } else if (link.rolling?.enabled) {
+      method = 'qr_rolling';
+    } else if (link.geo?.enabled) {
+      method = 'qr_geo';
+    }
+
+    // 8. Save attendance record
     try {
       const attendance = new Attendance({
         user: user.sub || user._id,
@@ -231,15 +419,22 @@ class AttendanceLinkService {
         markedAt: now,
         checkInTime: now,
         linkId: link._id,
+        sessionLabel: link.sessionLabel || '',
         status: 'present',
-        method: 'link',
+        method,
+        verification: {
+          method,
+          geoResult: link.geo?.enabled ? 'verified' : 'skipped',
+          distanceM: roundedDistance,
+          accuracyM: accuracyM,
+        },
       });
       await attendance.save();
       return attendance;
     } catch (saveErr) {
       // MongoDB duplicate key error code 11000
       if (saveErr.code === 11000) {
-        const err = new Error('Attendance already marked for today');
+        const err = new Error('Attendance already marked for this session');
         err.statusCode = 409;
         throw err;
       }
@@ -310,6 +505,18 @@ class AttendanceLinkService {
       .populate('user', 'name email')
       .sort({ markedAt: 1, checkInTime: 1 });
 
+    // Fetch all session links created today
+    let todayLinks = [];
+    if (mongoose.connection && mongoose.connection.readyState === 1) {
+      todayLinks = await AttendanceLink.find({
+        date: todayDate,
+        team: 'T3',
+      }).sort({ startsAt: -1 });
+    } else if (typeof AttendanceLink.find === 'function' && AttendanceLink.find !== mongoose.Model.find) {
+      const q = AttendanceLink.find({ date: todayDate, team: 'T3' });
+      todayLinks = q && typeof q.sort === 'function' ? await q.sort({ startsAt: -1 }) : (q ? await q : []);
+    }
+
     const presentMembers = attendanceList.map((rec) => {
       const u = rec.user || {};
       return {
@@ -319,6 +526,9 @@ class AttendanceLinkService {
         email: u.email || rec.studentEmail || '',
         markedAt: rec.markedAt || rec.checkInTime || rec.createdAt,
         method: rec.method || 'link',
+        linkId: rec.linkId || null,
+        sessionLabel: rec.sessionLabel || '',
+        verification: rec.verification || null,
       };
     });
 
@@ -332,6 +542,23 @@ class AttendanceLinkService {
         email: u.email,
       }));
 
+    const sessions = todayLinks.map((l) => {
+      const attendeesForSession = attendanceList.filter((a) => a.linkId && String(a.linkId) === String(l._id));
+      return {
+        id: l._id,
+        token: l.token,
+        sessionLabel: l.sessionLabel || 'Attendance Session',
+        startsAt: l.startsAt,
+        expiresAt: l.expiresAt,
+        active: l.active,
+        geoEnabled: !!l.geo?.enabled,
+        radiusM: l.geo?.radiusM || 100,
+        rollingEnabled: !!l.rolling?.enabled,
+        presentCount: attendeesForSession.length,
+        attendeeIds: attendeesForSession.map((a) => String(a.user?._id || a.studentId || a.user)),
+      };
+    });
+
     return {
       date: todayDate,
       timeZone: 'Asia/Kolkata',
@@ -340,6 +567,7 @@ class AttendanceLinkService {
       totalCount: allT3Users.length,
       presentMembers,
       absentMembers,
+      sessions,
     };
   }
 

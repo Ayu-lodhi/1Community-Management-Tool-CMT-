@@ -9,6 +9,7 @@ router.use(protect);
 // Time-Limited Attendance Link + QR Feature (T3 Team)
 router.post('/link/generate', attendanceGenerateLimiter, requireTeam('T3'), controller.generateLink);
 router.get('/link/:token', controller.getLinkInfo);
+router.get('/link/:token/rolling', requireTeam('T3'), controller.getRollingCode);
 router.post('/link/:token/mark', attendanceScanLimiter, controller.markLinkAttendance);
 router.post('/link/:token/deactivate', requireTeam('T3'), controller.deactivateLink);
 router.post('/link/:token/share-chat', requireTeam('T3'), controller.shareLinkToChat);

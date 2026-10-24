@@ -138,9 +138,18 @@ exports.getLinkInfo = async (req, res) => {
   }
 };
 
+exports.getRollingCode = async (req, res) => {
+  try {
+    const data = await linkService.getRollingCode(req.params.token, req.user);
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    handleAttendanceError(res, err);
+  }
+};
+
 exports.markLinkAttendance = async (req, res) => {
   try {
-    const record = await linkService.markAttendance(req.params.token, req.user);
+    const record = await linkService.markAttendance(req.params.token, req.user, req.body);
     res.status(201).json({ success: true, message: 'Attendance marked successfully', data: record });
   } catch (err) {
     handleAttendanceError(res, err);

@@ -4325,6 +4325,13 @@ export const AttendancePage = () => {
 
   // --- T3 Link & QR Generator State ---
   const [durationMinutes, setDurationMinutes] = useState(10);
+  const [sessionLabel, setSessionLabel] = useState('');
+  const [geoEnabled, setGeoEnabled] = useState(false);
+  const [radiusM, setRadiusM] = useState(100); // 100m default, options: 30, 50, 100
+  const [venueCoords, setVenueCoords] = useState(null);
+  const [capturingGeo, setCapturingGeo] = useState(false);
+  const [rollingEnabled, setRollingEnabled] = useState(false);
+  const [rollingInfo, setRollingInfo] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [generatedLink, setGeneratedLink] = useState(null);
   const [countdownMs, setCountdownMs] = useState(null);
@@ -4380,6 +4387,27 @@ export const AttendancePage = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // Poll rolling code if enabled on active link
+  useEffect(() => {
+    if (!generatedLink?.token || !generatedLink?.rolling?.enabled || !generatedLink.active) {
+      setRollingInfo(null);
+      return;
+    }
+
+    const fetchRolling = async () => {
+      try {
+        const res = await api.get(`/attendance/link/${generatedLink.token}/rolling`);
+        setRollingInfo(res.data.data);
+      } catch (err) {
+        console.warn('Failed to fetch rolling code:', err.message);
+      }
+    };
+
+    fetchRolling();
+    const interval = setInterval(fetchRolling, 3000);
+    return () => clearInterval(interval);
+  }, [generatedLink?.token, generatedLink?.rolling?.enabled, generatedLink?.active]);
+
   // Live countdown timer for active generated link
   useEffect(() => {
     if (!generatedLink?.expiresAt || !generatedLink.active) {
@@ -4400,16 +4428,57 @@ export const AttendancePage = () => {
     return () => clearInterval(interval);
   }, [generatedLink?.expiresAt, generatedLink?.active]);
 
+  const handleCaptureVenue = () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser');
+      return;
+    }
+    setCapturingGeo(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setVenueCoords({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        });
+        setCapturingGeo(false);
+      },
+      (err) => {
+        alert(`Failed to capture location: ${err.message}`);
+        setCapturingGeo(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
   // Handle generating new link & QR
   const handleGenerateLink = async (e) => {
     e?.preventDefault();
     setGenerating(true);
     setGenError('');
     try {
-      const res = await api.post('/attendance/link/generate', { minutes: durationMinutes });
+      const payload = {
+        minutes: durationMinutes,
+        sessionLabel: sessionLabel.trim(),
+      };
+      if (geoEnabled && venueCoords) {
+        payload.geo = {
+          enabled: true,
+          lat: venueCoords.lat,
+          lng: venueCoords.lng,
+          radiusM: radiusM,
+          maxAccuracyM: 100,
+        };
+      }
+      if (rollingEnabled) {
+        payload.rolling = {
+          enabled: true,
+          stepSeconds: 30,
+        };
+      }
+      const res = await api.post('/attendance/link/generate', payload);
       setGeneratedLink(res.data.data);
       setCopied(false);
-      // Refresh panel in case stats changed
       void fetchPanelData();
     } catch (err) {
       setGenError(err.response?.data?.message || err.message || 'Failed to generate link');
@@ -4676,6 +4745,81 @@ export const AttendancePage = () => {
                     </div>
                   </div>
 
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 uppercase mb-1.5">
+                      Session Name / Slot (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Morning Briefing, Workshop 1"
+                      value={sessionLabel}
+                      onChange={(e) => setSessionLabel(e.target.value)}
+                      className="w-full h-10 px-3.5 rounded-xl border border-gray-300 outline-none focus:border-indigo-500 text-xs font-medium text-slate-800"
+                    />
+                  </div>
+
+                  {/* Geofencing & Rolling Toggles */}
+                  <div className="pt-2 border-t border-gray-100 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={geoEnabled}
+                          onChange={(e) => {
+                            setGeoEnabled(e.target.checked);
+                            if (e.target.checked && !venueCoords) handleCaptureVenue();
+                          }}
+                          className="rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>Geofence Venue</span>
+                      </label>
+                      {geoEnabled && (
+                        <div className="flex gap-1 text-[11px]">
+                          {[100, 50, 30].map((r) => (
+                            <button
+                              key={r}
+                              type="button"
+                              onClick={() => setRadiusM(r)}
+                              className={`px-2 py-0.5 rounded font-semibold border ${
+                                radiusM === r
+                                  ? 'bg-indigo-600 text-white border-indigo-600'
+                                  : 'bg-gray-50 text-gray-600 border-gray-200'
+                              }`}
+                            >
+                              {r}m{r === 100 ? ' (Def)' : ''}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {geoEnabled && (
+                      <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600 flex items-center justify-between">
+                        <span>{venueCoords ? `Venue Set (±${Math.round(venueCoords.accuracy)}m)` : 'GPS coordinates not set'}</span>
+                        <button
+                          type="button"
+                          onClick={handleCaptureVenue}
+                          disabled={capturingGeo}
+                          className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800"
+                        >
+                          {capturingGeo ? 'Locating...' : venueCoords ? 'Re-capture' : 'Capture My GPS'}
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={rollingEnabled}
+                          onChange={(e) => setRollingEnabled(e.target.checked)}
+                          className="rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>Rolling QR Code (30s OTP)</span>
+                      </label>
+                    </div>
+                  </div>
+
                   <button
                     type="submit"
                     disabled={generating}
@@ -4741,6 +4885,13 @@ export const AttendancePage = () => {
                           className="w-56 h-56 object-contain"
                         />
                       </div>
+                      {rollingInfo?.code && (
+                        <div className="w-full max-w-xs mb-3 p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-center">
+                          <span className="text-[10px] font-mono uppercase font-bold text-indigo-600 tracking-wider">Presenter Live Code</span>
+                          <div className="text-3xl font-mono font-black text-indigo-700 tracking-widest mt-0.5">{rollingInfo.code}</div>
+                          <p className="text-[11px] text-indigo-600 mt-1">Changes in {rollingInfo.secondsRemaining}s</p>
+                        </div>
+                      )}
                       <p className="text-xs text-gray-500 mb-4">Scan with camera to open attendance page</p>
 
                       {/* Link URL with Copy */}
@@ -4877,6 +5028,41 @@ export const AttendancePage = () => {
                 <p className="text-[11px] text-rose-600/80 mt-0.5">Yet to mark attendance</p>
               </div>
             </div>
+
+            {/* Multi-Session Daily Breakdown */}
+            {panelData?.sessions && panelData.sessions.length > 0 && (
+              <div className="border border-indigo-100 rounded-xl bg-indigo-50/40 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Timer className="w-4 h-4 text-indigo-600" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-900">
+                      Today's Attendance Sessions ({panelData.sessions.length})
+                    </h3>
+                  </div>
+                  <span className="text-[11px] text-indigo-600 font-medium">Multiple sessions active</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {panelData.sessions.map((s, idx) => (
+                    <div key={s.id || idx} className="p-3 bg-white rounded-xl border border-indigo-100 shadow-2xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800 truncate">{s.sessionLabel || `Session ${idx + 1}`}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${s.active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                          {s.active ? 'ACTIVE' : 'ENDED'}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                        <span>Started: {new Date(s.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="font-bold text-indigo-600">{s.presentCount} present</span>
+                      </div>
+                      <div className="mt-1 flex gap-1 text-[10px] text-slate-400">
+                        {s.geoEnabled && <span className="bg-blue-50 text-blue-700 px-1 rounded">Geo {s.radiusM}m</span>}
+                        {s.rollingEnabled && <span className="bg-purple-50 text-purple-700 px-1 rounded">Rolling</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Two Side-by-Side Panels: Present vs Absent Members */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
@@ -5316,6 +5502,8 @@ export const AttendPage = () => {
   const [marking, setMarking] = useState(false);
   const [successData, setSuccessData] = useState(null);
   const [timeLeft, setTimeLeft] = useState(null);
+  const [inputCode, setInputCode] = useState('');
+  const [acquiringLocation, setAcquiringLocation] = useState(false);
 
   const fetchLink = async () => {
     if (!token) return;
@@ -5360,15 +5548,61 @@ export const AttendPage = () => {
     if (marking) return;
     setMarking(true);
     setError('');
+
+    let payload = {};
+
+    if (linkInfo?.rolling?.enabled) {
+      if (!inputCode.trim()) {
+        setError('Please enter the 6-character session code shown on the screen.');
+        setMarking(false);
+        return;
+      }
+      payload.code = inputCode.trim().toUpperCase();
+    }
+
+    if (linkInfo?.geo?.enabled) {
+      if (!navigator.geolocation) {
+        setError('Geolocation is not supported by your browser. Please ask your T3 lead to mark you manually.');
+        setMarking(false);
+        return;
+      }
+
+      setAcquiringLocation(true);
+      let pos;
+      try {
+        pos = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0,
+          });
+        });
+      } catch (geoErr) {
+        setAcquiringLocation(false);
+        setMarking(false);
+        let msg = 'Failed to acquire location.';
+        if (geoErr.code === 1) msg = 'Location access was denied. Please enable location permissions or request manual attendance from your T3 executive.';
+        else if (geoErr.code === 2) msg = 'Location signal unavailable. Please move near a window or outdoors and retry.';
+        else if (geoErr.code === 3) msg = 'Location request timed out. Please retry with a stronger GPS or network connection.';
+        setError(msg);
+        return;
+      }
+      setAcquiringLocation(false);
+
+      payload.lat = pos.coords.latitude;
+      payload.lng = pos.coords.longitude;
+      payload.accuracy = pos.coords.accuracy;
+    }
+
     try {
-      const res = await api.post(`/attendance/link/${token}/mark`, {});
+      const res = await api.post(`/attendance/link/${token}/mark`, payload);
       setSuccessData(res.data.data);
-      // Refresh status
       await fetchLink();
     } catch (err) {
       setError(err.response?.data?.message || err.message || 'Failed to mark attendance');
     } finally {
       setMarking(false);
+      setAcquiringLocation(false);
     }
   };
 
@@ -5500,11 +5734,38 @@ export const AttendPage = () => {
                 )}
               </div>
 
+              {/* Verification Requirements Badges */}
+              {linkInfo.geo?.enabled && (
+                <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 text-xs text-blue-800 flex items-center gap-2">
+                  <MapPin className="w-4 h-4 shrink-0 text-blue-600" />
+                  <span>Venue Geofence active (within {linkInfo.geo.radiusM || 100}m). Location will be verified on click.</span>
+                </div>
+              )}
+
+              {linkInfo.rolling?.enabled && !isAlreadyMarked && !isExpired && !isNotStarted && (
+                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                    6-Character Session Code
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={inputCode}
+                    onChange={(e) => setInputCode(e.target.value.toUpperCase())}
+                    placeholder="e.g. 8K2X9L"
+                    className="w-full text-center font-mono font-black text-xl tracking-widest px-3 py-2 border border-slate-300 rounded-lg outline-none focus:border-indigo-600 bg-white text-slate-900"
+                  />
+                  <p className="text-[11px] text-slate-500 text-center">
+                    Enter the code displayed on the presenter's screen
+                  </p>
+                </div>
+              )}
+
               {/* Already marked indicator */}
               {isAlreadyMarked && (
                 <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-center text-xs font-semibold text-emerald-700 flex items-center justify-center gap-1.5">
                   <Check className="w-4 h-4" />
-                  <span>You have already marked attendance for today!</span>
+                  <span>You have already marked attendance for this session!</span>
                 </div>
               )}
             </div>
@@ -5516,10 +5777,15 @@ export const AttendPage = () => {
               <button
                 type="button"
                 onClick={handleMarkAttendance}
-                disabled={marking}
+                disabled={marking || acquiringLocation}
                 className="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold rounded-xl transition duration-150 shadow-lg shadow-emerald-900/20 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer text-base"
               >
-                {marking ? (
+                {acquiringLocation ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Acquiring GPS Signal...</span>
+                  </>
+                ) : marking ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     <span>Verifying on Server...</span>
