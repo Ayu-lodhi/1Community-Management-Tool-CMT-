@@ -116,6 +116,25 @@ exports.login = async (identifier, password) => {
   return issueSession(updatedUser, false, sessionId);
 };
 
+exports.forgotPassword = async (email) => {
+  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    throw new Error('Please enter a valid email address');
+  }
+  await ensureDbConnected();
+  const user = await repository.findByEmail(email.trim().toLowerCase());
+  if (!user || !user.isActive) {
+    return { success: true };
+  }
+
+  const adminService = require('../admin/admin.service');
+  try {
+    await adminService.resetPassword(user._id);
+  } catch (err) {
+    console.error('Password reset dispatch error:', err.message);
+  }
+  return { success: true };
+};
+
 exports.verifyMfa = async (challengeToken, code) => {
   const challenge = tokens.verify(challengeToken, 'mfa');
   await ensureDbConnected();
@@ -219,7 +238,7 @@ exports.updateProfile = async (userId, data) => {
   if (changes.length > 0) {
     user.lastProfileUpdatedAt = new Date();
     await user.save();
-    sendProfileUpdatedEmail({
+    await sendProfileUpdatedEmail({
       to: user.email,
       name: user.name,
       updatedFields: changes,
@@ -274,7 +293,7 @@ exports.changePassword = async (credential, oldPassword, newPassword) => {
     } catch (_) {}
   }
 
-  sendPasswordChangedEmail({
+  await sendPasswordChangedEmail({
     to: user.email,
     name: user.name,
   }).catch((err) => console.error('Password changed email failed:', err.message));
@@ -312,7 +331,7 @@ exports.changeEmail = async (credential, newEmail, currentPassword) => {
   user.lastEmailUpdatedAt = new Date();
   await user.save();
 
-  sendEmailChangedEmail({
+  await sendEmailChangedEmail({
     oldEmail,
     newEmail: cleanEmail,
     name: user.name,

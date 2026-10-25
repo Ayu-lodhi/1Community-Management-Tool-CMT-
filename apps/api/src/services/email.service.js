@@ -15,6 +15,25 @@ const escapeHtml = (value) => String(value)
 //   2. PROD: Uses real SMTP (Gmail/SendGrid)
 // ====================================================================
 
+const deriveSesSmtpPassword = (secretKey, region = 'ap-south-1') => {
+  const crypto = require('crypto');
+  const DATE = '11111111';
+  const SERVICE = 'ses';
+  const MESSAGE = 'SendRawEmail';
+  const TERMINAL = 'aws4_request';
+  const VERSION = Buffer.from([0x04]);
+
+  const hmac = (key, data) => crypto.createHmac('sha256', key).update(data).digest();
+
+  const kDate = hmac('AWS4' + secretKey, DATE);
+  const kRegion = hmac(kDate, region);
+  const kService = hmac(kRegion, SERVICE);
+  const kSigning = hmac(kService, TERMINAL);
+  const signature = hmac(kSigning, MESSAGE);
+
+  return Buffer.concat([VERSION, signature]).toString('base64');
+};
+
 let transporter = null;
 let testAccount = null;
 
@@ -22,21 +41,29 @@ let testAccount = null;
 const initTransporter = async () => {
   if (transporter) return transporter;
 
+  const host = process.env.EMAIL_HOST || (process.env.AWS_REGION ? `email-smtp.${process.env.AWS_REGION}.amazonaws.com` : null);
+  const user = process.env.EMAIL_USER || process.env.AWS_ACCESS_KEY_ID;
+  const rawPass = process.env.EMAIL_PASS || process.env.AWS_SECRET_ACCESS_KEY;
+
   // Check if real SMTP credentials are provided
-  const hasRealCreds = process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS;
+  const hasRealCreds = host && user && rawPass;
 
   if (hasRealCreds) {
-    console.log('EMAIL_INIT :: Using real SMTP:', process.env.EMAIL_HOST);
+    console.log('EMAIL_INIT :: Using real SMTP:', host);
     const port = parseInt(process.env.EMAIL_PORT, 10) || 587;
     const isSecure = port === 465;
+    let smtpPass = rawPass;
+    if (smtpPass && smtpPass.length === 40 && !smtpPass.startsWith('B')) {
+      smtpPass = deriveSesSmtpPassword(smtpPass, process.env.AWS_REGION || 'ap-south-1');
+    }
     transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
+      host,
       port,
       secure: isSecure,
       requireTLS: !isSecure,
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
+        user,
+        pass: smtpPass,
       },
     });
   } else {
@@ -97,12 +124,35 @@ const sendEmail = async ({ to, subject, html, text, requestId, idempotencyKey, f
     if (!t) {
       return { success: false, error: 'SMTP credentials missing in production' };
     }
-    const info = await t.sendMail({
-      from: process.env.EMAIL_FROM || '"TBI Platform" <noreply@tbi.org>',
+    const fromAddress = process.env.EMAIL_FROM || (process.env.SES_FROM_NAME && process.env.SES_FROM_EMAIL
+      ? `"${process.env.SES_FROM_NAME}" <${process.env.SES_FROM_EMAIL}>`
+      : process.env.SES_FROM_EMAIL || '"TBI Platform" <noreply@tbi.org>');
+
+    const mailHeaders = {};
+    if (process.env.SES_CONFIGURATION_SET) {
+      mailHeaders['X-SES-CONFIGURATION-SET'] = process.env.SES_CONFIGURATION_SET;
+    }
+
+    const sendWithRetry = async (mailer, mailOpts, retries = 2) => {
+      try {
+        return await mailer.sendMail(mailOpts);
+      } catch (err) {
+        const isThrottled = /throttl|rate exceed|454|421/i.test(err?.message || '');
+        if (isThrottled && retries > 0) {
+          await new Promise((r) => setTimeout(r, 600));
+          return sendWithRetry(mailer, mailOpts, retries - 1);
+        }
+        throw err;
+      }
+    };
+
+    const info = await sendWithRetry(t, {
+      from: fromAddress,
       to,
       subject,
       html: html || text,
       text: text || '',
+      headers: Object.keys(mailHeaders).length > 0 ? mailHeaders : undefined,
     });
 
     const redactEmail = (addr) => {

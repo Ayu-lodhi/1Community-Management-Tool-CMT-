@@ -40,7 +40,7 @@ const generateDefaultPassword = () => {
   return pass;
 };
 
-const LOGIN_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const LOGIN_URL = process.env.FRONTEND_URL || process.env.CLIENT_URL || (process.env.VERCEL_PROJECT_NAME ? `https://${process.env.VERCEL_PROJECT_NAME}.vercel.app` : 'http://localhost:3000');
 
 exports.getAllUsers = async (options = {}) => {
   const query = {};
@@ -118,43 +118,56 @@ exports.bulkCreateUsers = async (rows, callerRole = null) => {
   let succeeded = 0;
   let failed = 0;
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const line = i + 1;
-    try {
-      if (row.role === 'SUPER_ADMIN' && callerRole !== 'SUPER_ADMIN') {
-        const err = new Error('Only Super Admins can create Super Admin accounts');
-        err.statusCode = 403;
-        throw err;
-      }
-      const { user, emailSent } = await exports.createUser(row, callerRole);
-      succeeded++;
-      results.push({
-        line,
-        email: row.email,
-        status: 'created',
-        emailSent,
-        user: {
-          _id: user._id,
-          userId: user.userId,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-      });
-    } catch (error) {
-      failed++;
-      const isExpected =
-        error.message === 'Email already exists' ||
-        error.message?.includes('Super Admin') ||
-        error.statusCode === 400 ||
-        error.statusCode === 403;
-      results.push({
-        line,
-        email: row.email,
-        status: 'failed',
-        error: isExpected ? error.message : 'User could not be created',
-      });
+  // Process in batches of 5 to balance concurrency with SES rate limits & Vercel execution timeouts
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batch = rows.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map(async (row, idx) => {
+        const line = i + idx + 1;
+        try {
+          if (row.role === 'SUPER_ADMIN' && callerRole !== 'SUPER_ADMIN') {
+            const err = new Error('Only Super Admins can create Super Admin accounts');
+            err.statusCode = 403;
+            throw err;
+          }
+          const { user, emailSent } = await exports.createUser(row, callerRole);
+          return {
+            success: true,
+            line,
+            email: row.email,
+            status: 'created',
+            emailSent,
+            user: {
+              _id: user._id,
+              userId: user.userId,
+              name: user.name,
+              email: user.email,
+              role: user.role,
+            },
+          };
+        } catch (error) {
+          const isExpected =
+            error.message === 'Email already exists' ||
+            error.message?.includes('Super Admin') ||
+            error.statusCode === 400 ||
+            error.statusCode === 403;
+          return {
+            success: false,
+            line,
+            email: row.email,
+            status: 'failed',
+            error: isExpected ? error.message : 'User could not be created',
+          };
+        }
+      })
+    );
+
+    for (const r of batchResults) {
+      if (r.success) succeeded++;
+      else failed++;
+      delete r.success;
+      results.push(r);
     }
   }
 
@@ -176,7 +189,7 @@ exports.updateUser = async (id, data) => {
   if (!user) throw new Error('User not found');
 
   if (Object.keys(safeData).length > 0) {
-    sendProfileUpdatedEmail({
+    await sendProfileUpdatedEmail({
       to: user.email,
       name: user.name,
       updatedFields: Object.keys(safeData),
@@ -418,6 +431,12 @@ exports.completePasswordReset = async (id, rawToken, newPassword) => {
   user.passwordChangeStartedAt = null;
   await user.save();
 
+  await sendPasswordChangedEmail({
+    to: user.email,
+    name: user.name,
+    byAdmin: false,
+  }).catch((err) => console.error('Reset complete email failed:', err.message));
+
   return { user: user.toObject({ virtuals: false }) };
 };
 
@@ -441,7 +460,7 @@ exports.setPassword = async (id, newPassword, adminId) => {
   user.mustChangePassword = false;
   await user.save();
 
-  sendPasswordChangedEmail({
+  await sendPasswordChangedEmail({
     to: user.email,
     name: user.name,
     byAdmin: true,
@@ -471,7 +490,7 @@ exports.changeEmail = async (id, newEmail, adminId) => {
   user.email = cleanEmail;
   await user.save();
 
-  sendEmailChangedEmail({
+  await sendEmailChangedEmail({
     oldEmail,
     newEmail: cleanEmail,
     name: user.name,

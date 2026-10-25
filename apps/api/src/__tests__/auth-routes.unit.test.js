@@ -20,3 +20,11 @@ test('POST /login route middleware stack', () => {
   const loginLimiterIndex = middlewareNames.indexOf('loginLimiter');
   assert.strictEqual(loginLimiterIndex, -1, 'loginLimiter should not be present');
 });
+
+test('POST /forgot-password route exists and has rate limiting', () => {
+  const forgotRoute = authRoutes.stack.find(
+    (layer) => layer.route && layer.route.path === '/forgot-password' && layer.route.methods.post
+  );
+  assert.ok(forgotRoute, 'POST /forgot-password route should exist');
+  assert.equal(forgotRoute.route.stack.length >= 2, true, 'Route must have rate limiter and controller');
+});

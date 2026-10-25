@@ -1,3 +1,4 @@
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '64';
 process.env.VERCEL = process.env.VERCEL || '1';
 const mongoose = require('mongoose');
 let app = null;
@@ -46,7 +47,10 @@ async function connectToDatabase() {
   const uri = normalizeMongoUri(rawUri);
 
   if (!cached.promise || mongoose.connection.readyState === 0 || mongoose.connection.readyState === 3) {
-    cached.promise = mongoose.connect(uri, { serverSelectionTimeoutMS: 8000 }).then((m) => {
+    cached.promise = mongoose.connect(uri, {
+      serverSelectionTimeoutMS: 8000,
+      maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE || '10', 10),
+    }).then((m) => {
       cached.conn = m;
       lastDbError = null;
       lastDbErrorStack = null;

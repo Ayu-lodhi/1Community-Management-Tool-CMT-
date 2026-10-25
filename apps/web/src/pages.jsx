@@ -232,6 +232,11 @@ export const Login = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showMuralOnMobile, setShowMuralOnMobile] = useState(false);
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState('');
+  const [forgotError, setForgotError] = useState('');
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -328,6 +333,34 @@ export const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     await performLogin(email, password);
+  };
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setForgotError('');
+    setForgotMessage('');
+    if (!forgotEmail.trim() || !forgotEmail.includes('@')) {
+      setForgotError('Please enter a valid email address.');
+      return;
+    }
+    setForgotLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setForgotMessage(data.message || 'If an account exists, a reset link has been sent.');
+      } else {
+        setForgotError(data.message || 'Failed to send reset link.');
+      }
+    } catch {
+      setForgotError('Network error. Please try again.');
+    } finally {
+      setForgotLoading(false);
+    }
   };
 
   const handleVerifyMfa = async (e) => {
@@ -544,9 +577,23 @@ export const Login = () => {
 
                   {/* Field 2: Password */}
                   <div>
-                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
-                      Password
-                    </label>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide">
+                        Password
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForgotEmail(email.includes('@') ? email : '');
+                          setForgotError('');
+                          setForgotMessage('');
+                          setShowForgotModal(true);
+                        }}
+                        className="font-['Space_Mono',monospace] text-[11px] text-[#1B5299] hover:underline cursor-pointer"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
                     <div className="relative flex items-center bg-white border-[2.5px] border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:border-[#1B5299] focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
                       <span className="pl-3 text-slate-500 shrink-0">
                         <Lock className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
@@ -663,6 +710,94 @@ export const Login = () => {
             </form>
           </div>
         </div>
+
+        {/* Forgot Password Modal */}
+        {showForgotModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <div className="relative w-full max-w-md bg-[#FAF8F5] border-[3px] border-[#1A1A1A] rounded-2xl shadow-[6px_6px_0px_0px_#1A1A1A] p-6 text-left">
+              <div className="flex items-center justify-between pb-3 mb-4 border-b-2 border-[#1A1A1A]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-lg bg-[#EBF3FA] border-2 border-[#1A1A1A] flex items-center justify-center text-[#1B5299]">
+                    <Key className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-['Barlow_Condensed',sans-serif] font-black text-xl text-[#1A1A1A] uppercase tracking-wide leading-none">
+                      Reset Password
+                    </h3>
+                    <p className="font-['Space_Mono',monospace] text-[11px] text-[#555] mt-0.5">
+                      We'll send a 1-hour secure link to your email
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotModal(false)}
+                  className="text-slate-500 hover:text-[#1A1A1A] p-1 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {forgotMessage ? (
+                <div className="space-y-4">
+                  <div className="p-3 bg-emerald-50 border-2 border-emerald-600 rounded-xl text-emerald-900 font-['Space_Mono',monospace] text-xs font-bold flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <span>{forgotMessage}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotModal(false)}
+                    className="w-full py-2.5 bg-[#1B5299] hover:bg-[#15427D] text-white border-2 border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl font-['Barlow_Condensed',sans-serif] font-black uppercase text-sm cursor-pointer"
+                  >
+                    Back to Sign In
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleForgotPassword} className="space-y-4">
+                  {forgotError && (
+                    <div className="p-2.5 bg-red-50 border-2 border-[#C8322B] rounded-xl text-xs text-[#C8322B] font-['Space_Mono',monospace] font-bold">
+                      {forgotError}
+                    </div>
+                  )}
+                  <div>
+                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs text-[#1A1A1A] uppercase tracking-wide mb-1">
+                      Account Email
+                    </label>
+                    <div className="relative flex items-center bg-white border-[2px] border-[#1A1A1A] shadow-[2px_2px_0px_0px_#1A1A1A] rounded-xl">
+                      <span className="pl-3 text-slate-500 shrink-0">
+                        <Mail className="w-4 h-4" />
+                      </span>
+                      <input
+                        type="email"
+                        value={forgotEmail}
+                        onChange={(e) => setForgotEmail(e.target.value)}
+                        placeholder="name@domain.com"
+                        required
+                        className="flex-1 bg-transparent font-['Space_Mono',monospace] text-xs text-[#1A1A1A] py-2 px-2.5 outline-none font-medium"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotModal(false)}
+                      className="px-4 py-2 border-2 border-[#1A1A1A] rounded-xl font-['Barlow_Condensed',sans-serif] font-bold uppercase text-sm text-[#1A1A1A] hover:bg-slate-100 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      className="px-5 py-2 bg-[#1B5299] hover:bg-[#15427D] text-white border-2 border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl font-['Barlow_Condensed',sans-serif] font-black uppercase text-sm cursor-pointer disabled:opacity-50"
+                    >
+                      {forgotLoading ? 'Sending...' : 'Send Reset Link'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
