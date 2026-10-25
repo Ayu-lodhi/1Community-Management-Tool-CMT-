@@ -239,9 +239,20 @@ class WorkforceService {
     return await ShiftAssignment.find(query).sort({ date: 1, startTime: 1 }).lean();
   }
 
-  async deleteAssignment(id) {
+  async deleteAssignment(id, requester) {
     const assignment = await ShiftAssignment.findById(id);
     if (!assignment) throw new ValidationError('Shift assignment not found');
+
+    const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(requester?.role);
+    if (!isAdmin && assignment.teamId) {
+      const Team = require('../teams/teams.model');
+      const team = await Team.findById(assignment.teamId);
+      if (!team || team.leadId?.toString() !== requester?.sub?.toString()) {
+        const err = new Error('Access denied: You can only delete shifts for teams you lead.');
+        err.statusCode = 403;
+        throw err;
+      }
+    }
 
     const hasAttendance = await DailyAttendance.exists({ userId: assignment.userId, date: assignment.date });
     if (hasAttendance) {

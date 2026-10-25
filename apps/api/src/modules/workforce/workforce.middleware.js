@@ -42,9 +42,20 @@ const requireTeamLeadOrAdmin = async (req, res, next) => {
 
     if (req.user?.role === 'T3_EXECUTIVE') {
       if (req.method === 'POST' && (req.path === '/tasks' || req.path === '/attendance/mark-all-present')) {
-        const ledTeam = await Team.findOne({ leadId: req.user.sub }).select('leadId');
-        if (!ledTeam) {
-          return res.status(403).json({ success: false, message: 'You are not designated as lead for any team' });
+        const targetTeamId = req.body?.teamId;
+        let ledTeam;
+        if (targetTeamId) {
+          const q = Team.findOne({ _id: targetTeamId, leadId: req.user.sub });
+          ledTeam = typeof q.select === 'function' ? await q.select('leadId') : await q;
+          if (!ledTeam) {
+            return res.status(403).json({ success: false, message: 'Access denied: You are not designated as lead for this team' });
+          }
+        } else {
+          const q = Team.findOne({ leadId: req.user.sub });
+          ledTeam = typeof q.select === 'function' ? await q.select('leadId') : await q;
+          if (!ledTeam) {
+            return res.status(403).json({ success: false, message: 'You are not designated as lead for any team' });
+          }
         }
         req.team = ledTeam;
         req.body.teamId = ledTeam._id;

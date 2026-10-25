@@ -47,17 +47,40 @@ exports.getMyReviews = async (req, res) => {
 exports.createReview = async (req, res) => {
   try {
     const { studentId, studentName, eventId, eventTitle, rating, feedback } = req.body;
-    if (!studentId || !studentName || !rating || !feedback) {
+    if (!studentId || !studentName || rating === undefined || !feedback) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
+    }
+
+    const numRating = parseInt(rating, 10);
+    if (isNaN(numRating) || numRating < 1 || numRating > 5 || Number(rating) !== numRating) {
+      return res.status(400).json({ success: false, message: 'Rating must be an integer between 1 and 5' });
+    }
+
+    if (studentId.toString() === req.user.sub.toString()) {
+      return res.status(403).json({ success: false, message: 'Self-reviews are not permitted' });
+    }
+
+    if (eventId) {
+      const existing = await Review.findOne({
+        reviewedBy: req.user.sub,
+        studentId,
+        eventId,
+      });
+      if (existing) {
+        return res.status(409).json({
+          success: false,
+          message: 'You have already reviewed this student for this event',
+        });
+      }
     }
 
     const review = await Review.create({
       studentId,
       studentName,
-      eventId,
-      eventTitle,
-      rating: Number(rating),
-      feedback,
+      eventId: eventId || null,
+      eventTitle: eventTitle || '',
+      rating: numRating,
+      feedback: String(feedback).trim(),
       reviewedBy: req.user.sub,
       reviewerName: req.user.name || 'Reviewer',
     });
