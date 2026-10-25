@@ -21,25 +21,6 @@ async function checkRedisInstance(client) {
   }
 }
 
-const normalizeMongoUri = (rawUri) => {
-  if (!rawUri || typeof rawUri !== 'string') return rawUri;
-  if (rawUri.startsWith('mongodb+srv://') && rawUri.includes('-shard-00-00.')) {
-    try {
-      const prefix = rawUri.replace('mongodb+srv://', 'mongodb://');
-      const [userPart, rest] = prefix.split('@');
-      if (rest) {
-        const [hostPart, queryPart] = rest.split('/');
-        const baseDomain = hostPart.replace('ac-gkiqwag-shard-00-00.', '');
-        const hosts = ['00-00', '00-01', '00-02'].map((s) => `ac-gkiqwag-shard-${s}.${baseDomain}:27017`).join(',');
-        const dbAndQuery = queryPart || 'tbi_db';
-        const sep = dbAndQuery.includes('?') ? '&' : '?';
-        return `${userPart}@${hosts}/${dbAndQuery}${dbAndQuery.includes('ssl=') ? '' : `${sep}ssl=true&replicaSet=atlas-6g5sz6-shard-0&authSource=admin`}`;
-      }
-    } catch (_) {}
-  }
-  return rawUri;
-};
-
 /**
  * Health check controller
  * Checks MongoDB and all three isolated Redis instances (cache, pubsub, queue).
@@ -48,7 +29,7 @@ const normalizeMongoUri = (rawUri) => {
 async function getHealth(req, res) {
   if (mongoose.connection.readyState !== 1 && process.env.MONGODB_URI) {
     try {
-      await mongoose.connect(normalizeMongoUri(process.env.MONGODB_URI), { serverSelectionTimeoutMS: 5000 });
+      await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
     } catch (_) {}
   }
   const mongoOk = mongoose.connection.readyState === 1 ? 'ok' : 'not-ok';

@@ -2,7 +2,7 @@ const Announcement = require('./announcements.model');
 const User = require('../admin/admin.model');
 const Team = require('../teams/teams.model');
 const Event = require('../events/events.model');
-const { notify } = require('../notifications/notifications.service');
+const { notify, notifyMany } = require('../notifications/notifications.service');
 
 class AnnouncementService {
 
@@ -80,10 +80,8 @@ class AnnouncementService {
       recipientCount: recipientIds.length,
     });
 
-    // Send real-time notifications
-    for (const userId of recipientIds) {
-      await notify(userId, 'announcement', `Announcement: ${title}`, message);
-    }
+    // Send real-time notifications via chunked parallel dispatcher
+    await notifyMany(recipientIds, 'announcement', `Announcement: ${title}`, message);
 
     return announcement;
   }

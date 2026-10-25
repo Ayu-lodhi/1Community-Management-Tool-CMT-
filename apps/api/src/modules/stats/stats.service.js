@@ -7,17 +7,29 @@ const Certificate = require('../certificates/certificates.model');
 
 const today = () => new Date().toISOString().split('T')[0];
 
-// In-memory 30-second TTL cache for dashboard aggregates
+// In-memory 30-second TTL cache for dashboard aggregates with bounded eviction
 const statsCache = new Map();
 const STATS_CACHE_TTL_MS = 30 * 1000;
+const MAX_STATS_CACHE_SIZE = 100;
 
 async function getOrSetCache(key, fetcher) {
+  const now = Date.now();
   const cached = statsCache.get(key);
-  if (cached && Date.now() < cached.expiresAt) {
+  if (cached && now < cached.expiresAt) {
     return cached.data;
   }
+  // Evict expired entries when writing or approaching capacity
+  if (statsCache.size >= MAX_STATS_CACHE_SIZE) {
+    for (const [k, v] of statsCache.entries()) {
+      if (now >= v.expiresAt) statsCache.delete(k);
+    }
+    if (statsCache.size >= MAX_STATS_CACHE_SIZE) {
+      const oldestKey = statsCache.keys().next().value;
+      if (oldestKey) statsCache.delete(oldestKey);
+    }
+  }
   const data = await fetcher();
-  statsCache.set(key, { data, expiresAt: Date.now() + STATS_CACHE_TTL_MS });
+  statsCache.set(key, { data, expiresAt: now + STATS_CACHE_TTL_MS });
   return data;
 }
 
@@ -326,4 +338,8 @@ class StatsService {
   }
 }
 
-module.exports = new StatsService();
+const serviceInstance = new StatsService();
+serviceInstance._statsCache = statsCache;
+serviceInstance._getOrSetCache = getOrSetCache;
+
+module.exports = serviceInstance;

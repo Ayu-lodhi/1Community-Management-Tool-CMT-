@@ -429,7 +429,10 @@ exports.completePasswordReset = async (id, rawToken, newPassword) => {
   user.password = await bcrypt.hash(newPassword, 12);
   user.mustChangePassword = false;
   user.passwordChangeStartedAt = null;
+  user.activeSessionId = null;
+  user.lastActivity = null;
   await user.save();
+  await invalidateUserPermissions(user._id);
 
   await sendPasswordChangedEmail({
     to: user.email,

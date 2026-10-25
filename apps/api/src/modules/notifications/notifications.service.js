@@ -62,17 +62,23 @@ exports.notify = async (userId, type, title, message, linkTo = '') => {
   }
 };
 
-// Notify many users
+// Notify many users in concurrent chunks to avoid blocking the event loop
 exports.notifyMany = async (userIds, type, title, message, linkTo = '') => {
   try {
+    if (!Array.isArray(userIds) || userIds.length === 0) return [];
     const results = [];
-    for (const userId of userIds) {
-      const r = await exports.notify(userId, type, title, message, linkTo);
-      if (r) results.push(r);
+    const chunkSize = 20;
+    for (let i = 0; i < userIds.length; i += chunkSize) {
+      const chunk = userIds.slice(i, i + chunkSize);
+      const chunkResults = await Promise.all(
+        chunk.map((userId) => exports.notify(userId, type, title, message, linkTo))
+      );
+      results.push(...chunkResults.filter(Boolean));
     }
     return results;
   } catch (err) {
     console.error('NotifyMany failed:', err.message);
+    return [];
   }
 };
 
