@@ -197,6 +197,9 @@ class ApplicationService {
       if (!team || team.leadId?.toString() !== requesterSub) {
         throw new Error('Not authorized to update this application');
       }
+      if (app.studentId?.toString() === requesterSub?.toString()) {
+        throw new Error('Self-approval is not permitted. An administrator must review your application.');
+      }
     }
 
     const reviewerDoc = await User.findById(requesterSub).select('name');

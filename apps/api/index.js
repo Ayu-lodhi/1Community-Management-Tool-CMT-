@@ -91,12 +91,14 @@ const handler = async (req, res) => {
   const url = req.url || '';
 
   if (url === '/api/db-status' || url === '/db-status') {
+    if (process.env.NODE_ENV === 'production') {
+      return sendJson(res, 404, { success: false, message: 'Route not found' });
+    }
     await connectToDatabase().catch(() => {});
     return sendJson(res, 200, {
       readyState: mongoose.connection.readyState,
       connected: mongoose.connection.readyState === 1,
-      lastDbError,
-      lastDbErrorStack,
+      lastDbError: lastDbError ? 'Database connection failure' : null,
       has_MONGODB_URI: Boolean(process.env.MONGODB_URI),
     });
   }

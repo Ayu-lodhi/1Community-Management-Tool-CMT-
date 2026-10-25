@@ -37,7 +37,11 @@ const isAllowedOrigin = (origin) => {
   }
   if (process.env.CLIENT_URL && origin === process.env.CLIENT_URL) return true;
   if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) return true;
-  if (process.env.VERCEL && origin.endsWith('.vercel.app')) return true;
+  if (process.env.VERCEL) {
+    const proj = process.env.VERCEL_PROJECT_NAME;
+    if (proj && (origin === `https://${proj}.vercel.app` || origin.startsWith(`https://${proj}-`))) return true;
+    if (process.env.VERCEL_URL && origin === `https://${process.env.VERCEL_URL}`) return true;
+  }
   if (process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
     return true;
   }
@@ -110,7 +114,7 @@ app.use((err, req, res, next) => {
 
 console.log('Connecting to MongoDB...');
 const MONGODB_URI = process.env.MONGODB_URI;
-if (mongoose.connection.readyState === 0 && MONGODB_URI) {
+if (process.env.NODE_ENV !== 'test' && mongoose.connection.readyState === 0 && MONGODB_URI) {
   mongoose
     .connect(MONGODB_URI, {
       serverSelectionTimeoutMS: 10000,

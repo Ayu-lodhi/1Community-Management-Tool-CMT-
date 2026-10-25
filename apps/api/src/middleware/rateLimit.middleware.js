@@ -61,7 +61,7 @@ const getClientIdentifier = (req) => {
   if (req.user?.sub) {
     return `user:${req.user.sub}`;
   }
-  return `ip:${req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown'}`;
+  return `ip:${req.ip || req.socket?.remoteAddress || 'unknown'}`;
 };
 
 const handleRedisLimiter = async (req, res, next, redisKey, windowMs, maxRequests, fallbackFn, identifier, errorMsg) => {

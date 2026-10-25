@@ -29,7 +29,9 @@ test('Super Admin routes testing', async (t) => {
     const origFind = User.find;
     User.find = () => ({
       select: () => ({
-        sort: async () => [{ name: 'Test', activeSessionId: 'sess123' }]
+        sort: () => ({
+          lean: async () => [{ name: 'Test', activeSessionId: 'sess123' }]
+        })
       })
     });
 

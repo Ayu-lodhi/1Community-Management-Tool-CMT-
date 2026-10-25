@@ -104,8 +104,8 @@ class AnnouncementService {
     // Everyone sees ALL-type announcements
     filters.push({ target: 'ALL' });
 
-    // T3/T2 also see their team announcements
-    if (isT3 || isT2) {
+    // All members also see their team announcements
+    if (!isAdmin) {
       const teams = await Team.find({
         $or: [{ members: user.sub }, { leadId: user.sub }],
       }).select('_id');

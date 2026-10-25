@@ -36,6 +36,10 @@ test('CORS configuration on real server.js', async (t) => {
       }
       await new Promise((resolve) => testServer.close(resolve));
     }
+    try {
+      const { closeQueues } = require('../core/queues/queue.service');
+      await closeQueues();
+    } catch (_) {}
     for (const [key, val] of Object.entries(initialEnv)) {
       if (val === undefined) {
         delete process.env[key];

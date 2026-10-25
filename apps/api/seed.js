@@ -8,6 +8,10 @@ const User = require('./src/modules/admin/admin.model');
 console.log('Loaded MONGODB_URI:', process.env.MONGODB_URI ? 'YES ' : 'NO ');
 
 const seed = async () => {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('FATAL: Database seeding is strictly disabled in production environments.');
+    process.exit(1);
+  }
   try {
     console.log(' Connecting to MongoDB Atlas...');
     await mongoose.connect(process.env.MONGODB_URI, {
