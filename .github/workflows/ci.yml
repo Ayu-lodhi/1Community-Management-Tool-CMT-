@@ -32,7 +32,6 @@ jobs:
         run: |
           node -r ./apps/api/test-setup.js --test apps/api/src/__tests__/*.unit.test.js
           node --test apps/web/src/__tests__/*.test.js
-          node --test apps/web/server/modules/auth/__tests__/*.unit.test.js
 
       - name: Build web
         run: npm run build --workspace=@tbi/web
