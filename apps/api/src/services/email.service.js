@@ -41,11 +41,16 @@ const clean = (val) => (typeof val === 'string' ? val.trim() : '');
 
 const getSmtpCredentials = () => {
   const region = clean(process.env.AWS_REGION) || 'ap-south-1';
-  const host = clean(process.env.EMAIL_HOST) || (clean(process.env.AWS_REGION) ? `email-smtp.${region}.amazonaws.com` : null);
   const user = clean(process.env.EMAIL_USER) || clean(process.env.AWS_ACCESS_KEY_ID);
   const rawPass = clean(process.env.EMAIL_PASS) || clean(process.env.AWS_SECRET_ACCESS_KEY);
+  const host = clean(process.env.EMAIL_HOST) || `email-smtp.${region}.amazonaws.com`;
   const hasRealCreds = Boolean(host && user && rawPass);
-  return { host, user, rawPass, region, hasRealCreds };
+
+  const missing = [];
+  if (!user) missing.push('AWS_ACCESS_KEY_ID (or EMAIL_USER)');
+  if (!rawPass) missing.push('AWS_SECRET_ACCESS_KEY (or EMAIL_PASS)');
+
+  return { host, user, rawPass, region, hasRealCreds, missing };
 };
 
 // Initialize transporter
@@ -105,10 +110,11 @@ const _resetTransporter = () => {
 
 // Send email (dispatches to worker queue when available, with direct fallback)
 const sendEmail = async ({ to, subject, html, text, requestId, idempotencyKey, forceDirect = false }) => {
-  const { hasRealCreds } = getSmtpCredentials();
+  const { hasRealCreds, missing } = getSmtpCredentials();
   if (process.env.NODE_ENV === 'production' && !hasRealCreds) {
-    console.error('EMAIL_INIT :: Production SMTP credentials missing (EMAIL_HOST, EMAIL_USER, EMAIL_PASS required)');
-    return { success: false, error: 'SMTP credentials missing in production' };
+    const errorMsg = `SMTP credentials missing in Vercel: missing [${missing.join(', ')}]`;
+    console.error(`EMAIL_INIT :: ${errorMsg}`);
+    return { success: false, error: errorMsg };
   }
 
   const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
@@ -130,7 +136,7 @@ const sendEmail = async ({ to, subject, html, text, requestId, idempotencyKey, f
   try {
     const t = await initTransporter();
     if (!t) {
-      return { success: false, error: 'SMTP credentials missing in production' };
+      return { success: false, error: `SMTP credentials missing in Vercel: missing [${missing.join(', ')}]` };
     }
     const cleanFromName = (process.env.SES_FROM_NAME || 'TBI Platform').replace(/^["']+|["']+$/g, '').trim();
     const fromAddress = process.env.EMAIL_FROM || (process.env.SES_FROM_EMAIL
