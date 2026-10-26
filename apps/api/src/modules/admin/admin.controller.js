@@ -28,6 +28,7 @@ exports.addUser = async (req, res) => {
       message,
       data: user,
       emailSent,
+      emailError: !emailSent ? emailDelivery?.error : undefined,
       tempPassword: !emailSent ? tempPassword : undefined,
     });
   } catch (error) {
@@ -105,13 +106,14 @@ exports.deleteUser = async (req, res) => {
 // RESET PASSWORD — sends a one-time reset link to user's email
 exports.resetPassword = async (req, res) => {
   try {
-    const { user, emailSent, resetUrl } = await adminService.resetPassword(req.params.id);
+    const { user, emailSent, emailError, resetUrl } = await adminService.resetPassword(req.params.id);
     res.status(200).json({
       success: true,
       message: emailSent
         ? `Password reset link emailed to ${user.email}. Link expires in 1 hour.`
-        : 'Reset link generated but email delivery failed. Please retry.',
+        : (emailError ? `Reset link generated but email delivery failed: ${emailError}` : 'Reset link generated but email delivery failed. Please retry.'),
       emailSent,
+      emailError: !emailSent ? emailError : undefined,
       resetUrl: !emailSent ? resetUrl : undefined,
     });
   } catch (error) {

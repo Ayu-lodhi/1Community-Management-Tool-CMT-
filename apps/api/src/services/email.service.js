@@ -37,27 +37,30 @@ const deriveSesSmtpPassword = (secretKey, region = 'ap-south-1') => {
 let transporter = null;
 let testAccount = null;
 
+const clean = (val) => (typeof val === 'string' ? val.trim() : '');
+
 const getSmtpCredentials = () => {
-  const host = process.env.EMAIL_HOST || (process.env.AWS_REGION ? `email-smtp.${process.env.AWS_REGION}.amazonaws.com` : null);
-  const user = process.env.EMAIL_USER || process.env.AWS_ACCESS_KEY_ID;
-  const rawPass = process.env.EMAIL_PASS || process.env.AWS_SECRET_ACCESS_KEY;
+  const region = clean(process.env.AWS_REGION) || 'ap-south-1';
+  const host = clean(process.env.EMAIL_HOST) || (clean(process.env.AWS_REGION) ? `email-smtp.${region}.amazonaws.com` : null);
+  const user = clean(process.env.EMAIL_USER) || clean(process.env.AWS_ACCESS_KEY_ID);
+  const rawPass = clean(process.env.EMAIL_PASS) || clean(process.env.AWS_SECRET_ACCESS_KEY);
   const hasRealCreds = Boolean(host && user && rawPass);
-  return { host, user, rawPass, hasRealCreds };
+  return { host, user, rawPass, region, hasRealCreds };
 };
 
 // Initialize transporter
 const initTransporter = async () => {
   if (transporter) return transporter;
 
-  const { host, user, rawPass, hasRealCreds } = getSmtpCredentials();
+  const { host, user, rawPass, region, hasRealCreds } = getSmtpCredentials();
 
   if (hasRealCreds) {
     console.log('EMAIL_INIT :: Using real SMTP:', host);
     const port = parseInt(process.env.EMAIL_PORT, 10) || 587;
     const isSecure = port === 465;
     let smtpPass = rawPass;
-    if (smtpPass && smtpPass.length === 40 && !smtpPass.startsWith('B')) {
-      smtpPass = deriveSesSmtpPassword(smtpPass, process.env.AWS_REGION || 'ap-south-1');
+    if (smtpPass && !smtpPass.startsWith('B')) {
+      smtpPass = deriveSesSmtpPassword(smtpPass, region);
     }
     transporter = nodemailer.createTransport({
       host,
@@ -68,6 +71,7 @@ const initTransporter = async () => {
         user,
         pass: smtpPass,
       },
+      tls: { minVersion: 'TLSv1.2' },
     });
   } else {
     if (process.env.NODE_ENV === 'production') {
@@ -107,7 +111,8 @@ const sendEmail = async ({ to, subject, html, text, requestId, idempotencyKey, f
     return { success: false, error: 'SMTP credentials missing in production' };
   }
 
-  if (!forceDirect && process.env.USE_WORKER_QUEUES !== 'false' && process.env.NODE_ENV !== 'test') {
+  const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  if (!forceDirect && !isServerless && process.env.REDIS_QUEUE_URL && process.env.USE_WORKER_QUEUES !== 'false' && process.env.NODE_ENV !== 'test') {
     try {
       const enqueueResult = await enqueueEmail(
         'sendEmail',

@@ -377,6 +377,7 @@ exports.resetPassword = async (id) => {
 
   // Email the link
   let emailSent = false;
+  let emailError = null;
   try {
     const result = await sendPasswordResetLinkEmail({
       to: user.email,
@@ -384,11 +385,13 @@ exports.resetPassword = async (id) => {
       resetUrl,
     });
     emailSent = result.success;
+    emailError = result.error || null;
   } catch (err) {
     console.error('Reset link email failed:', err.message);
+    emailError = err.message;
   }
 
-  return { user: user.toObject({ virtuals: false }), emailSent, resetUrl };
+  return { user: user.toObject({ virtuals: false }), emailSent, emailError, resetUrl };
 };
 
 // VERIFY TOKEN — check a one-time reset link token
