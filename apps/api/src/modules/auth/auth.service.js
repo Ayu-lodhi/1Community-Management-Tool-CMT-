@@ -248,11 +248,13 @@ exports.updateProfile = async (userId, data) => {
   return user.toObject({ virtuals: false });
 };
 
-exports.changePassword = async (credential, oldPassword, newPassword) => {
+exports.changePassword = async (credential, oldPassword, newPassword, reqContext = {}) => {
   const user = await repository.findById(credential.sub);
   if (!user?.isActive || credential.authState !== tokens.authState(user)) {
     throw new Error('Credentials changed; sign in again');
   }
+
+  const callerIp = reqContext.ip || reqContext.headers?.['x-forwarded-for'] || reqContext.socket?.remoteAddress || 'unknown';
 
   if (!user.mustChangePassword) {
     checkAdminDailyLimit(user, 'lastPasswordUpdatedAt', 'change their password');
@@ -266,8 +268,15 @@ exports.changePassword = async (credential, oldPassword, newPassword) => {
       throw new Error('Password replacement required');
     }
   } else {
+    const { checkPasswordRateLimit, recordFailedPasswordChange, resetPasswordRateLimit } = require('../../middleware/rateLimit.middleware');
+    await checkPasswordRateLimit(user._id, callerIp);
+
     if (credential.purpose !== 'access' || typeof oldPassword !== 'string' ||
-        !(await bcrypt.compare(oldPassword, user.password))) throw new Error('Current password is incorrect');
+        !(await bcrypt.compare(oldPassword, user.password))) {
+      await recordFailedPasswordChange(user._id, callerIp);
+      throw new Error('Current password is incorrect');
+    }
+    await resetPasswordRateLimit(user._id, callerIp);
   }
 
   if (typeof newPassword !== 'string' || newPassword.length < 8) {
@@ -283,15 +292,36 @@ exports.changePassword = async (credential, oldPassword, newPassword) => {
   if (!/[^A-Za-z0-9]/.test(newPassword)) throw new Error('Password must contain a special character');
 
   if (await bcrypt.compare(newPassword, user.password)) throw new Error('New password must differ from the current password');
-  const updated = await repository.replacePassword(user, await bcrypt.hash(newPassword, 12));
+  const rounds = parseInt(process.env.BCRYPT_ROUNDS, 10) || 12;
+  const updated = await repository.replacePassword(user, await bcrypt.hash(newPassword, rounds));
   if (!updated) throw new Error('Credentials changed; sign in again');
 
   const mongoose = require('mongoose');
-  if (user.mustChangePassword && mongoose.connection?.readyState === 1 && User && typeof User.updateOne === 'function') {
+  if (mongoose.connection?.readyState === 1 && User && typeof User.updateOne === 'function') {
     try {
       await User.updateOne({ _id: user._id }, { $set: { activeSessionId: null, lastActivity: null } });
     } catch (_) {}
   }
+  try {
+    const { invalidateUserPermissions } = require('../../core/cache/permissionCache');
+    await invalidateUserPermissions(user._id);
+  } catch (_) {}
+
+  try {
+    const AuditLog = require('../../models/AuditLog.model');
+    if (AuditLog && typeof AuditLog.create === 'function') {
+      await AuditLog.create({
+        action: 'PASSWORD_CHANGED',
+        performedBy: user._id,
+        performedByName: user.name || user.email || '',
+        targetId: user._id,
+        targetType: 'User',
+        ipAddress: callerIp !== 'unknown' ? callerIp : null,
+        details: {},
+        timestamp: new Date(),
+      });
+    }
+  } catch (_) {}
 
   await sendPasswordChangedEmail({
     to: user.email,

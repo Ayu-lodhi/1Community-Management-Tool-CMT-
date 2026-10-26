@@ -22,6 +22,7 @@ const inMemoryUserCreateRequests = new Map();
 const inMemoryBulkImportRequests = new Map();
 const inMemoryAttendanceGenRequests = new Map();
 const inMemoryAttendanceScanRequests = new Map();
+const inMemoryPasswordChangeFailures = new Map();
 
 const GLOBAL_WINDOW_MS = 15 * 60 * 1000;
 const GLOBAL_MAX_REQUESTS = 500;
@@ -38,6 +39,8 @@ const ATTENDANCE_GENERATE_MAX_REQUESTS = 10;
 const ATTENDANCE_SCAN_WINDOW_MS = 60 * 1000;
 const ATTENDANCE_SCAN_MAX_REQUESTS = 30;
 
+const PWD_CHANGE_WINDOW_MS = 15 * 60 * 1000;
+const PWD_CHANGE_MAX_FAILURES = 5;
 
 // Pruning interval
 setInterval(() => {
@@ -48,6 +51,7 @@ setInterval(() => {
     [inMemoryBulkImportRequests, BULK_IMPORT_WINDOW_MS],
     [inMemoryAttendanceGenRequests, ATTENDANCE_GENERATE_WINDOW_MS],
     [inMemoryAttendanceScanRequests, ATTENDANCE_SCAN_WINDOW_MS],
+    [inMemoryPasswordChangeFailures, PWD_CHANGE_WINDOW_MS],
   ]) {
     for (const [key, record] of map.entries()) {
       if (now > record.resetTime) {
@@ -166,7 +170,85 @@ exports.attendanceScanLimiter = (req, res, next) => {
     identifier, 'Too many attendance submissions, please try again later.');
 };
 
+const checkPasswordRateLimit = async (userId, ip) => {
+  const key = `rl:pwd_change:${userId || 'anon'}:${ip || 'unknown'}`;
+  if (redisCache && redisCache.status === 'ready') {
+    try {
+      const countStr = await redisCache.get(key);
+      const count = parseInt(countStr || '0', 10);
+      if (count >= PWD_CHANGE_MAX_FAILURES) {
+        const err = new Error('Too many failed password attempts. Please try again later.');
+        err.statusCode = 429;
+        throw err;
+      }
+      return;
+    } catch (err) {
+      if (err.statusCode === 429) throw err;
+    }
+  }
+
+  const now = Date.now();
+  const record = inMemoryPasswordChangeFailures.get(key);
+  if (record && now <= record.resetTime && record.count >= PWD_CHANGE_MAX_FAILURES) {
+    const err = new Error('Too many failed password attempts. Please try again later.');
+    err.statusCode = 429;
+    throw err;
+  }
+};
+
+const recordFailedPasswordChange = async (userId, ip) => {
+  const key = `rl:pwd_change:${userId || 'anon'}:${ip || 'unknown'}`;
+  if (redisCache && redisCache.status === 'ready') {
+    try {
+      const results = await redisCache.multi().incr(key).pttl(key).exec();
+      if (results && results[0] && !results[0][0]) {
+        const count = results[0][1];
+        let ttl = results[1] ? results[1][1] : -1;
+        if (ttl === -1 || count === 1) {
+          await redisCache.pexpire(key, PWD_CHANGE_WINDOW_MS);
+        }
+      }
+      return;
+    } catch (_) {}
+  }
+
+  const now = Date.now();
+  const record = inMemoryPasswordChangeFailures.get(key) || { count: 0, resetTime: now + PWD_CHANGE_WINDOW_MS };
+  if (now > record.resetTime) {
+    record.count = 1;
+    record.resetTime = now + PWD_CHANGE_WINDOW_MS;
+  } else {
+    record.count++;
+  }
+  inMemoryPasswordChangeFailures.set(key, record);
+};
+
+const resetPasswordRateLimit = async (userId, ip) => {
+  const key = `rl:pwd_change:${userId || 'anon'}:${ip || 'unknown'}`;
+  if (redisCache && redisCache.status === 'ready') {
+    try {
+      await redisCache.del(key);
+    } catch (_) {}
+  }
+  inMemoryPasswordChangeFailures.delete(key);
+};
+
+exports.changePasswordLimiter = async (req, res, next) => {
+  const userId = req.user?.sub || req.user?._id || req.user?.id || 'anon';
+  const ip = req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown';
+  try {
+    await checkPasswordRateLimit(userId, ip);
+    next();
+  } catch (err) {
+    return res.status(err.statusCode || 429).json({ success: false, message: err.message });
+  }
+};
+
+exports.checkPasswordRateLimit = checkPasswordRateLimit;
+exports.recordFailedPasswordChange = recordFailedPasswordChange;
+exports.resetPasswordRateLimit = resetPasswordRateLimit;
 
 exports._inMemoryAttendanceGenRequests = inMemoryAttendanceGenRequests;
 exports._inMemoryAttendanceScanRequests = inMemoryAttendanceScanRequests;
+exports._inMemoryPasswordChangeFailures = inMemoryPasswordChangeFailures;
 

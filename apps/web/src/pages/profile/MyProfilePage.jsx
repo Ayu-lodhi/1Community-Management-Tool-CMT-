@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../api';
+import { ChangePasswordCard } from './ChangePasswordCard';
 import {
   User, Mail, Phone, MapPin, Briefcase, GraduationCap, Award,
   ExternalLink, CheckCircle2, AlertCircle, Sparkles, TrendingUp,
@@ -787,6 +788,9 @@ export const MyProfilePage = () => {
             </button>
           </div>
         </form>
+
+        {/* 4. Security & Change Password Card */}
+        <ChangePasswordCard />
       </div>
 
       {/* Education Modal */}

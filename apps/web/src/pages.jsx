@@ -9260,20 +9260,20 @@ export const ChangePasswordPage = () => {
             {!isForced && (
               <div>
                 <label className="block text-sm font-medium mb-2">Current Password</label>
-                <input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)}
+                <input type="password" name="current-password" autoComplete="current-password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)}
                   placeholder="Your current password"
                   className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required={!isForced} />
               </div>
             )}
             <div>
               <label className="block text-sm font-medium mb-2">New Password</label>
-              <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
+              <input type="password" name="new-password" autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="Strong password"
                 className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required />
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">Confirm New Password</label>
-              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
+              <input type="password" name="confirm-password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
                 placeholder="Repeat new password"
                 className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required />
             </div>

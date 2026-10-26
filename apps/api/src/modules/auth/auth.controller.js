@@ -93,10 +93,10 @@ exports.changeEmail = async (req, res) => {
 exports.changePassword = async (req, res) => {
   try {
     const { oldPassword, newPassword } = req.body;
-    await authService.changePassword(req.user, oldPassword, newPassword);
+    await authService.changePassword(req.user, oldPassword, newPassword, req);
     res.status(200).json({ success: true, message: 'Password changed successfully' });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    res.status(error.statusCode || 400).json({ success: false, message: error.message });
   }
 };
 

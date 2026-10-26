@@ -56,5 +56,5 @@ exports.consumeTemporaryPassword = (user) => User.findOneAndUpdate({
 { new: true }).select('+password +mfa +passwordChangeStartedAt');
 
 exports.replacePassword = (user, password) => User.findOneAndUpdate(credentialFilter(user), {
-  $set: { password, mustChangePassword: false, passwordChangeStartedAt: null, tempPasswordExpiresAt: null, lastPasswordUpdatedAt: new Date(), updatedAt: new Date() },
+  $set: { password, mustChangePassword: false, passwordChangeStartedAt: null, tempPasswordExpiresAt: null, activeSessionId: null, lastActivity: null, lastPasswordUpdatedAt: new Date(), updatedAt: new Date() },
 }, { new: true });
