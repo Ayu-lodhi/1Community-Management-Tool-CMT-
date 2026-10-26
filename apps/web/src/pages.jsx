@@ -1531,7 +1531,10 @@ export const UserManagement = () => {
       setModal(false);
       setForm({ name: '', email: '', phone: '', role: 'T1_VOLUNTEER' });
       if (res.data?.emailSent === false) {
-        alert(`User created, but welcome email could not be sent (SMTP not configured or failed).\n\nPlease check server email settings.`);
+        const credsMsg = res.data?.tempPassword
+          ? `\n\nLogin Credentials:\nUser ID / Email: ${res.data.data.userId || res.data.data.email}\nTemporary Password: ${res.data.tempPassword}\n\nPlease share these credentials directly with ${res.data.data.name}. They will be prompted to set a new password on first login.`
+          : '';
+        alert(`User created, but welcome email could not be sent (SMTP not configured or failed).${credsMsg}\n\nPlease check email provider settings in Vercel.`);
       } else {
         alert(`User created!\n\nAn email with login credentials has been sent to ${res.data.data.email}.`);
       }
@@ -1548,11 +1551,14 @@ export const UserManagement = () => {
     if (!confirm(`Send a secure password reset link to ${u.name}?\n\nA one-time link will be emailed to: ${u.email}\nThe link will expire in 1 hour.`)) return;
     try {
       const res = await api.post(`/admin/users/${u._id}/reset-password`);
-      const { emailSent } = res.data;
+      const { emailSent, resetUrl } = res.data;
       if (emailSent) {
         alert(`Reset link sent!\n\nA secure one-time password reset link has been emailed to:\n${u.email}\n\nThe link expires in 1 hour and can only be used once.`);
       } else {
-        alert(`Reset link generated but email delivery failed.\n\nPlease try again or contact your email provider.`);
+        const linkMsg = resetUrl
+          ? `\n\nOne-time reset link:\n${resetUrl}\n\nYou can copy and share this link directly with ${u.name} (valid for 1 hour).\n\nTip: You can also click "Set Password" on their row to set their password directly.`
+          : `\n\nPlease try again or use the "Set Password" button to set their password directly.`;
+        alert(`Reset link generated but email delivery failed.${linkMsg}`);
       }
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to send reset link');

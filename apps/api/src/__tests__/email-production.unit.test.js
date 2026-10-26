@@ -26,6 +26,9 @@ test('Email service production configuration & emailSent reporting', async (t) =
     delete process.env.EMAIL_HOST;
     delete process.env.EMAIL_USER;
     delete process.env.EMAIL_PASS;
+    delete process.env.AWS_REGION;
+    delete process.env.AWS_ACCESS_KEY_ID;
+    delete process.env.AWS_SECRET_ACCESS_KEY;
   });
 
   afterEach(() => {
@@ -43,6 +46,9 @@ test('Email service production configuration & emailSent reporting', async (t) =
     delete process.env.EMAIL_HOST;
     delete process.env.EMAIL_USER;
     delete process.env.EMAIL_PASS;
+    delete process.env.AWS_REGION;
+    delete process.env.AWS_ACCESS_KEY_ID;
+    delete process.env.AWS_SECRET_ACCESS_KEY;
 
     User.findOne = async () => null;
     User.create = async (doc) => ({
@@ -85,6 +91,36 @@ test('Email service production configuration & emailSent reporting', async (t) =
     }, 'SUPER_ADMIN');
 
     assert.strictEqual(result.emailSent, true, 'emailSent must be true when SMTP sends successfully');
+    assert.strictEqual(result.user.password, undefined, 'password must not be in user object');
+  });
+
+  await t.test('with AWS SES IAM credentials configured (mock transport) returns emailSent true in production', async () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.EMAIL_HOST;
+    delete process.env.EMAIL_USER;
+    delete process.env.EMAIL_PASS;
+    process.env.AWS_REGION = 'ap-south-1';
+    process.env.AWS_ACCESS_KEY_ID = 'AKIA_MOCK_SES_KEY';
+    process.env.AWS_SECRET_ACCESS_KEY = 'mock_secret_key_that_is_40_chars_long!!';
+
+    nodemailer.createTransport = () => ({
+      sendMail: async () => ({ messageId: '<test-ses-message-id@domain>' }),
+    });
+
+    User.findOne = async () => null;
+    User.create = async (doc) => ({
+      ...doc,
+      _id: '507f1f77bcf86cd799439014',
+      toObject: () => ({ ...doc, _id: '507f1f77bcf86cd799439014' }),
+    });
+
+    const result = await adminService.createUser({
+      name: 'Test SES User',
+      email: 'testses@example.com',
+      role: 'T1_VOLUNTEER',
+    }, 'SUPER_ADMIN');
+
+    assert.strictEqual(result.emailSent, true, 'emailSent must be true when AWS SES sends successfully');
     assert.strictEqual(result.user.password, undefined, 'password must not be in user object');
   });
 

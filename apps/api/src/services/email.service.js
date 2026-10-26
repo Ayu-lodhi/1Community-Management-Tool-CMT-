@@ -37,16 +37,19 @@ const deriveSesSmtpPassword = (secretKey, region = 'ap-south-1') => {
 let transporter = null;
 let testAccount = null;
 
+const getSmtpCredentials = () => {
+  const host = process.env.EMAIL_HOST || (process.env.AWS_REGION ? `email-smtp.${process.env.AWS_REGION}.amazonaws.com` : null);
+  const user = process.env.EMAIL_USER || process.env.AWS_ACCESS_KEY_ID;
+  const rawPass = process.env.EMAIL_PASS || process.env.AWS_SECRET_ACCESS_KEY;
+  const hasRealCreds = Boolean(host && user && rawPass);
+  return { host, user, rawPass, hasRealCreds };
+};
+
 // Initialize transporter
 const initTransporter = async () => {
   if (transporter) return transporter;
 
-  const host = process.env.EMAIL_HOST || (process.env.AWS_REGION ? `email-smtp.${process.env.AWS_REGION}.amazonaws.com` : null);
-  const user = process.env.EMAIL_USER || process.env.AWS_ACCESS_KEY_ID;
-  const rawPass = process.env.EMAIL_PASS || process.env.AWS_SECRET_ACCESS_KEY;
-
-  // Check if real SMTP credentials are provided
-  const hasRealCreds = host && user && rawPass;
+  const { host, user, rawPass, hasRealCreds } = getSmtpCredentials();
 
   if (hasRealCreds) {
     console.log('EMAIL_INIT :: Using real SMTP:', host);
@@ -98,7 +101,7 @@ const _resetTransporter = () => {
 
 // Send email (dispatches to worker queue when available, with direct fallback)
 const sendEmail = async ({ to, subject, html, text, requestId, idempotencyKey, forceDirect = false }) => {
-  const hasRealCreds = process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS;
+  const { hasRealCreds } = getSmtpCredentials();
   if (process.env.NODE_ENV === 'production' && !hasRealCreds) {
     console.error('EMAIL_INIT :: Production SMTP credentials missing (EMAIL_HOST, EMAIL_USER, EMAIL_PASS required)');
     return { success: false, error: 'SMTP credentials missing in production' };
@@ -124,9 +127,10 @@ const sendEmail = async ({ to, subject, html, text, requestId, idempotencyKey, f
     if (!t) {
       return { success: false, error: 'SMTP credentials missing in production' };
     }
-    const fromAddress = process.env.EMAIL_FROM || (process.env.SES_FROM_NAME && process.env.SES_FROM_EMAIL
-      ? `"${process.env.SES_FROM_NAME}" <${process.env.SES_FROM_EMAIL}>`
-      : process.env.SES_FROM_EMAIL || '"TBI Platform" <noreply@tbi.org>');
+    const cleanFromName = (process.env.SES_FROM_NAME || 'TBI Platform').replace(/^["']+|["']+$/g, '').trim();
+    const fromAddress = process.env.EMAIL_FROM || (process.env.SES_FROM_EMAIL
+      ? `"${cleanFromName}" <${process.env.SES_FROM_EMAIL.trim()}>`
+      : '"TBI Platform" <noreply@tbi.org>');
 
     const mailHeaders = {};
     if (process.env.SES_CONFIGURATION_SET) {

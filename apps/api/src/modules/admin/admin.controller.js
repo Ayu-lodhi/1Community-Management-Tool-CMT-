@@ -18,7 +18,7 @@ exports.addUser = async (req, res) => {
         message: 'Only Super Admins can create Super Admin or Admin accounts',
       });
     }
-    const { user, emailDelivery, emailSent: sentFlag } = await adminService.createUser(req.body, req.user?.role);
+    const { user, emailDelivery, emailSent: sentFlag, tempPassword } = await adminService.createUser(req.body, req.user?.role);
     const emailSent = emailDelivery ? emailDelivery.sent : sentFlag;
     const message = emailSent
       ? 'User created. Credentials sent via email.'
@@ -28,6 +28,7 @@ exports.addUser = async (req, res) => {
       message,
       data: user,
       emailSent,
+      tempPassword: !emailSent ? tempPassword : undefined,
     });
   } catch (error) {
     const isExpected =
@@ -104,13 +105,14 @@ exports.deleteUser = async (req, res) => {
 // RESET PASSWORD — sends a one-time reset link to user's email
 exports.resetPassword = async (req, res) => {
   try {
-    const { user, emailSent } = await adminService.resetPassword(req.params.id);
+    const { user, emailSent, resetUrl } = await adminService.resetPassword(req.params.id);
     res.status(200).json({
       success: true,
       message: emailSent
         ? `Password reset link emailed to ${user.email}. Link expires in 1 hour.`
         : 'Reset link generated but email delivery failed. Please retry.',
       emailSent,
+      resetUrl: !emailSent ? resetUrl : undefined,
     });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
