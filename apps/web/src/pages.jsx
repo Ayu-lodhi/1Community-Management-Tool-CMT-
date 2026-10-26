@@ -272,8 +272,8 @@ export const Login = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          identifier: loginEmail,
-          email: loginEmail,
+          identifier: (loginEmail || '').trim(),
+          email: (loginEmail || '').trim(),
           password: loginPassword,
           captchaId: captchaChallenge?.captchaId,
           captchaAnswer: captchaAnswer.trim(),
@@ -302,16 +302,24 @@ export const Login = () => {
         setLoading(false);
         return;
       }
-      if (data.data?.mustChangePassword && data.data?.passwordChangeToken) {
-        sessionStorage.setItem('tbi_token', data.data.passwordChangeToken);
+      if (data.data?.mustChangePassword) {
+        const token = data.data.passwordChangeToken || data.data.accessToken;
+        if (token) {
+          sessionStorage.setItem('tbi_token', token);
+        }
         navigate('/change-password', { replace: true, state: { forced: true } });
         return;
+      }
+      if (!data.data?.user) {
+        throw new Error('Invalid server response during sign in. Please try again.');
       }
       login(data.data.user, data.data.accessToken);
       navigate(ROLES[data.data.user.role].route);
     } catch (err) {
       const raw = err?.message || '';
-      if (err.status === 409 || /already logged in/i.test(raw)) {
+      if (/temporary password|password replacement/i.test(raw)) {
+        setError(raw);
+      } else if (err.status === 409 || /already logged in/i.test(raw)) {
         setError(raw || 'This account is already logged in on another device');
       } else if (/invalid|incorrect|credential|password|email/i.test(raw) && !/server|init|import|syntax|failed|validation|missing|config/i.test(raw)) {
         setError('Invalid username or password. Please verify your credentials.');

@@ -58,7 +58,7 @@ const acquireSession = async (userId) => {
   // terminating any previous active session and establishing this login as the active one.
   let updatedUser;
   try {
-    updatedUser = await User.findByIdAndUpdate(
+    const updateQuery = User.findByIdAndUpdate(
       userId,
       {
         $set: {
@@ -68,6 +68,9 @@ const acquireSession = async (userId) => {
       },
       { new: true }
     );
+    updatedUser = typeof updateQuery?.select === 'function'
+      ? await updateQuery.select('+password +mfa +passwordChangeStartedAt')
+      : await updateQuery;
   } catch (err) {
     const error = new Error('Service temporarily unavailable');
     error.statusCode = 503;
@@ -103,7 +106,6 @@ exports.login = async (identifier, password) => {
       ? new Date() > new Date(user.tempPasswordExpiresAt)
       : user.createdAt && (Date.now() - new Date(user.createdAt).getTime() > 7 * 24 * 60 * 60 * 1000);
     if (isExpired) throw new Error('Temporary password expired; ask an administrator to reset it');
-    if (user.passwordChangeStartedAt) throw new Error('Temporary password already used; ask an administrator to reset it');
     user = await repository.consumeTemporaryPassword(user);
     if (!user) throw new Error('Credentials changed or temporary password already used; ask an administrator to reset it');
   }

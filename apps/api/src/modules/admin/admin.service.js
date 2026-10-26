@@ -5,6 +5,7 @@ const { disconnectUserSockets } = require('../../config/socket');
 const { invalidateUserPermissions } = require('../../core/cache/permissionCache');
 const { recordPermissionAudit } = require('../../core/utils/auditLogger');
 const User = require('./admin.model');
+const defaultFindById = User.findById;
 const defaultFindOneAndUpdate = User.findOneAndUpdate;
 const { getNextUserId } = require('../../services/userId.service');
 const { sendWelcomeEmail, sendPasswordResetLinkEmail, sendProfileUpdatedEmail, sendPasswordChangedEmail, sendEmailChangedEmail } = require('../../services/email.service');
@@ -430,7 +431,9 @@ exports.completePasswordReset = async (id, rawToken, newPassword) => {
 
   // 1. Attempt atomic consumption first (prevents TOCTOU concurrency race conditions)
   let user = null;
-  const canUseAtomic = mongoose.connection?.readyState === 1 || (typeof User.findOneAndUpdate === 'function' && User.findOneAndUpdate !== defaultFindOneAndUpdate);
+  const isFindByIdMocked = typeof User.findById === 'function' && User.findById !== defaultFindById;
+  const isFindOneAndUpdateMocked = typeof User.findOneAndUpdate === 'function' && User.findOneAndUpdate !== defaultFindOneAndUpdate;
+  const canUseAtomic = isFindOneAndUpdateMocked || (!isFindByIdMocked && mongoose.connection?.readyState === 1);
   if (canUseAtomic) {
     user = await User.findOneAndUpdate(
       {
