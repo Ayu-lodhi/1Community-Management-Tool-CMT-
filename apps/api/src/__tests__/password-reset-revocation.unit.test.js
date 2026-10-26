@@ -14,9 +14,11 @@ const User = require('../modules/admin/admin.model');
 
 test('Password Reset Revocation and Route Rate Limiting', async (t) => {
   const origFindById = User.findById;
+  const origFindOneAndUpdate = User.findOneAndUpdate;
 
   t.afterEach(() => {
     User.findById = origFindById;
+    User.findOneAndUpdate = origFindOneAndUpdate;
   });
 
   await t.test('completePasswordReset clears activeSessionId and lastActivity upon completion', async () => {
@@ -71,5 +73,57 @@ test('Password Reset Revocation and Route Rate Limiting', async (t) => {
       completeRoute.route.stack.length >= 2,
       'POST /reset-password/complete must have rate limiting middleware'
     );
+  });
+
+  await t.test('verifyResetToken rejects malformed ObjectId safely with clean error', async () => {
+    await assert.rejects(
+      () => adminService.verifyResetToken('not-a-valid-id', 'some-raw-token'),
+      (err) => {
+        assert.strictEqual(err.message, 'Invalid or expired reset link');
+        return true;
+      }
+    );
+  });
+
+  await t.test('completePasswordReset rejects malformed ObjectId safely with clean error', async () => {
+    await assert.rejects(
+      () => adminService.completePasswordReset('invalid-id-format', 'some-raw-token', 'NewPass123!'),
+      (err) => {
+        assert.strictEqual(err.message, 'Invalid or expired reset link');
+        return true;
+      }
+    );
+  });
+
+  await t.test('completePasswordReset supports atomic findOneAndUpdate consumption', async () => {
+    const userId = new mongoose.Types.ObjectId().toString();
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+    let atomicQuery = null;
+    let atomicUpdate = null;
+    const origFindOneAndUpdate = User.findOneAndUpdate;
+
+    User.findOneAndUpdate = async (query, update) => {
+      atomicQuery = query;
+      atomicUpdate = update;
+      return {
+        _id: userId,
+        email: 'atomic@example.com',
+        name: 'Atomic User',
+        toObject: () => ({ _id: userId, email: 'atomic@example.com' }),
+      };
+    };
+
+    try {
+      const res = await adminService.completePasswordReset(userId, rawToken, 'AtomicPass123!');
+      assert.ok(res.user);
+      assert.strictEqual(atomicQuery._id, userId);
+      assert.strictEqual(atomicQuery.passwordResetToken, tokenHash);
+      assert.strictEqual(atomicUpdate.$set.passwordResetToken, null);
+      assert.strictEqual(atomicUpdate.$set.activeSessionId, null);
+    } finally {
+      User.findOneAndUpdate = origFindOneAndUpdate;
+    }
   });
 });
