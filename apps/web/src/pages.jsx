@@ -181,44 +181,6 @@ const MENUS = {
   ],
 };
 
-// Quick Demo Login Bar (Local development only; tree-shaken from production builds)
-const DemoLoginBar = import.meta.env.DEV
-  ? ({ onSelect }) => {
-      const demoUsers = [
-        { key: 'SUPER', label: 'Super', email: import.meta.env.VITE_DEMO_SUPER_EMAIL, pass: import.meta.env.VITE_DEMO_SUPER_PASSWORD, style: 'border-red-700 bg-red-50 text-red-700 hover:bg-red-600 hover:text-white' },
-        { key: 'ADMIN', label: 'Admin', email: import.meta.env.VITE_DEMO_ADMIN_EMAIL, pass: import.meta.env.VITE_DEMO_ADMIN_PASSWORD, style: 'border-blue-700 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white' },
-        { key: 'T3', label: 'T3 Exec', email: import.meta.env.VITE_DEMO_T3_EMAIL, pass: import.meta.env.VITE_DEMO_T3_PASSWORD, style: 'border-indigo-700 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white' },
-        { key: 'T2', label: 'T2 Assoc', email: import.meta.env.VITE_DEMO_T2_EMAIL, pass: import.meta.env.VITE_DEMO_T2_PASSWORD, style: 'border-cyan-700 bg-cyan-50 text-cyan-700 hover:bg-cyan-600 hover:text-white' },
-        { key: 'T1', label: 'T1 Vol', email: import.meta.env.VITE_DEMO_T1_EMAIL, pass: import.meta.env.VITE_DEMO_T1_PASSWORD, style: 'border-emerald-700 bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white' },
-      ];
-      if (!demoUsers.some((u) => u.email && u.pass)) return null;
-
-      return (
-        <div className="pt-2.5 border-t border-slate-200 mt-1">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] font-['Space_Mono',monospace] font-bold text-slate-500 uppercase tracking-wider">
-              Quick Role Sign In
-            </span>
-            <span className="text-[9px] text-slate-400 font-medium">Local Dev Demo Login</span>
-          </div>
-          <div className="grid grid-cols-5 gap-1">
-            {demoUsers.map((u) => (
-              <button
-                key={u.key}
-                type="button"
-                onClick={() => onSelect(u.email, u.pass)}
-                className={`px-1 py-1 text-[10px] font-bold rounded-lg border ${u.style} transition-all shadow-xs text-center truncate`}
-                title={`Sign in as ${u.label}`}
-              >
-                {u.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      );
-    }
-  : null;
-
 // ====================================================================
 // LOGIN
 // ====================================================================
@@ -704,17 +666,6 @@ export const Login = () => {
                   {loading ? 'Processing...' : (mfaChallenge ? 'Verify & Sign In' : 'Sign In')}
                 </button>
               </div>
-
-              {/* Quick Demo Access Bar (Development only) */}
-              {DemoLoginBar && (
-                <DemoLoginBar
-                  onSelect={(e, p) => {
-                    setEmail(e || '');
-                    setPassword(p || '');
-                    void performLogin(e || '', p || '');
-                  }}
-                />
-              )}
             </form>
           </div>
         </div>
@@ -1069,18 +1020,6 @@ export const Sidebar = () => {
         ))}
       </nav>
       <div className="border-t border-white/10 p-2 space-y-1">
-        <button
-          onClick={() => {
-            logout();
-            navigate('/login?switch=true');
-            setMobileOpen(false);
-          }}
-          title="Switch to another user role"
-          className="w-full flex items-center gap-3 h-10 px-3 rounded-lg text-xs font-semibold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-colors"
-        >
-          <Key className="w-4 h-4 shrink-0 text-amber-400" />
-          {(!collapsed || mobileOpen) && <span className="truncate">Switch Role</span>}
-        </button>
         <button
           onClick={() => { logout(); navigate('/login'); setMobileOpen(false); }}
           className="w-full flex items-center gap-3 h-10 px-3 rounded-lg text-sm text-gray-300 hover:bg-white/5 hover:text-white transition-colors"
