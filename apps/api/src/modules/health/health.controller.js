@@ -47,7 +47,8 @@ async function getHealth(req, res) {
     redis_queue: queueOk,
   };
 
-  const allHealthy = Object.values(components).every((status) => status === 'ok');
+  const redisRequired = process.env.ALLOW_NO_REDIS !== 'true';
+  const allHealthy = mongoOk === 'ok' && (!redisRequired || (cacheOk === 'ok' && pubsubOk === 'ok' && queueOk === 'ok'));
 
   return res.status(allHealthy ? 200 : 503).json({
     status: allHealthy ? 'ok' : 'degraded',
