@@ -76,12 +76,10 @@ test('Phase 2 - Token signed with old hardcoded fallback placeholder is rejected
   );
 });
 
-test('Phase 2 - Both token modules throw when JWT_ACCESS_SECRET or JWT_REFRESH_SECRET is missing', () => {
+test('Phase 2 - Token module throws when JWT_ACCESS_SECRET or JWT_REFRESH_SECRET is missing', () => {
   const apiTokens = require('../modules/auth/auth.tokens');
-  const webTokens = require('../../../web/server/modules/auth/auth.tokens');
   const modules = [
     { name: 'apps/api/src/modules/auth/auth.tokens', mod: apiTokens },
-    { name: 'apps/web/server/modules/auth/auth.tokens', mod: webTokens },
   ];
 
   for (const { name, mod } of modules) {

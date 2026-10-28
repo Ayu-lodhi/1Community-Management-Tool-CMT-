@@ -107,11 +107,20 @@ test('CORS configuration on real server.js', async (t) => {
   await t.test('(e) http://localhost:3000 gets no header when NODE_ENV=production', async () => {
     process.env.NODE_ENV = 'production';
     delete process.env.ALLOWED_ORIGINS;
-    const res = await fetch(baseUrl, {
-      headers: { Origin: 'http://localhost:3000', Connection: 'close' },
-    });
-    // status is irrelevant here: with NODE_ENV=production and no Redis the global limiter returns 500; this case only checks CORS headers.
-    assert.strictEqual(res.headers.get('access-control-allow-origin'), null);
+    const origFrontend = process.env.FRONTEND_URL;
+    const origClient = process.env.CLIENT_URL;
+    delete process.env.FRONTEND_URL;
+    delete process.env.CLIENT_URL;
+    try {
+      const res = await fetch(baseUrl, {
+        headers: { Origin: 'http://localhost:3000', Connection: 'close' },
+      });
+      // status is irrelevant here: with NODE_ENV=production and no Redis the global limiter returns 500; this case only checks CORS headers.
+      assert.strictEqual(res.headers.get('access-control-allow-origin'), null);
+    } finally {
+      if (origFrontend) process.env.FRONTEND_URL = origFrontend;
+      if (origClient) process.env.CLIENT_URL = origClient;
+    }
   });
 
   await t.test('(f) the same origin is allowed when NODE_ENV is not production', async () => {

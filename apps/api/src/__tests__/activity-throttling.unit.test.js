@@ -46,8 +46,8 @@ test('touchUserActivity database write throttling', async (t) => {
     assert.strictEqual(updateCalls, 0, 'Database write should be throttled within 60s window');
     assert.strictEqual(user.lastActivity, call1Time, 'In-memory lastActivity must still be updated');
 
-    // Second call: 65 seconds later (> 60s from initialTime)
-    const call2Time = new Date('2026-10-25T10:01:05.000Z');
+    // Second call: 65 seconds later (> 60s from previous call1Time)
+    const call2Time = new Date('2026-10-25T10:01:15.000Z');
     await touchUserActivity(user, call2Time);
 
     assert.strictEqual(updateCalls, 1, 'Database write should execute once 60s threshold passes');
