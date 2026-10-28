@@ -197,6 +197,22 @@ async function changeUserTier(caller, targetUserId, newTier, reason = '') {
   targetUser.tier = newTier;
   await targetUser.save();
 
+  // If demoted from T3 to T1 or T2, unassign from team lead
+  if (oldTier === 'T3' && (newTier === 'T1' || newTier === 'T2')) {
+    const ledTeam = await Team.findOne({ leadId: targetUser._id });
+    if (ledTeam) {
+      await Team.updateOne({ _id: ledTeam._id }, { $set: { leadId: null } });
+      await recordPermissionAudit({
+        performedBy: caller._id,
+        targetId: ledTeam._id,
+        targetType: 'Team',
+        action: 'TEAM_LEAD_UNASSIGNED_ON_DEMOTION',
+        oldValue: { leadId: targetUser._id },
+        newValue: { leadId: null, demotedUser: targetUser._id, newTier },
+      }).catch(() => {});
+    }
+  }
+
   // Invalidate permissions and disconnect active sockets to enforce immediate effect
   disconnectUserSockets(targetUser._id);
   await invalidateUserPermissions(targetUser._id);
@@ -235,8 +251,8 @@ async function getUserProgress(userId) {
     const Attendance = require('../attendance/attendance.model');
     const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
     const attendedCount = await Attendance.countDocuments({
-      studentId: userId,
-      status: 'PRESENT',
+      $or: [{ studentId: userId }, { user: userId }],
+      status: { $in: ['present', 'PRESENT'] },
       createdAt: { $gte: ninetyDaysAgo },
     });
     // Target: 20 attendances in 90 days = 100%

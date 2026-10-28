@@ -50,26 +50,31 @@ const DEFAULT_JOB_OPTIONS = {
 let emailQueue = null;
 let certificateQueue = null;
 
-try {
-  emailQueue = new Queue('email-queue', {
-    connection: connectionOpts,
-    defaultJobOptions: DEFAULT_JOB_OPTIONS,
-  });
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const skipQueues = isServerless || process.env.ALLOW_NO_REDIS === 'true' || process.env.NODE_ENV === 'test';
 
-  certificateQueue = new Queue('certificate-queue', {
-    connection: connectionOpts,
-    defaultJobOptions: DEFAULT_JOB_OPTIONS,
-  });
+if (!skipQueues) {
+  try {
+    emailQueue = new Queue('email-queue', {
+      connection: connectionOpts,
+      defaultJobOptions: DEFAULT_JOB_OPTIONS,
+    });
 
-  emailQueue.on('error', (err) => {
-    logger.warn('Email Queue connection error (will retry or fallback)', { error: err.message });
-  });
+    certificateQueue = new Queue('certificate-queue', {
+      connection: connectionOpts,
+      defaultJobOptions: DEFAULT_JOB_OPTIONS,
+    });
 
-  certificateQueue.on('error', (err) => {
-    logger.warn('Certificate Queue connection error (will retry or fallback)', { error: err.message });
-  });
-} catch (err) {
-  logger.error('Failed to initialize BullMQ queues', { error: err.message });
+    emailQueue.on('error', (err) => {
+      logger.warn('Email Queue connection error (will retry or fallback)', { error: err.message });
+    });
+
+    certificateQueue.on('error', (err) => {
+      logger.warn('Certificate Queue connection error (will retry or fallback)', { error: err.message });
+    });
+  } catch (err) {
+    logger.error('Failed to initialize BullMQ queues', { error: err.message });
+  }
 }
 
 const maskEmail = (email) => {

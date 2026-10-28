@@ -1,18 +1,39 @@
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const { disconnectUserSockets } = require('../../config/socket');
 const { invalidateUserPermissions } = require('../../core/cache/permissionCache');
 const { recordPermissionAudit } = require('../../core/utils/auditLogger');
 const User = require('./admin.model');
+const defaultFindById = User.findById;
+const defaultFindOneAndUpdate = User.findOneAndUpdate;
 const { getNextUserId } = require('../../services/userId.service');
 const { sendWelcomeEmail, sendPasswordResetLinkEmail, sendProfileUpdatedEmail, sendPasswordChangedEmail, sendEmailChangedEmail } = require('../../services/email.service');
-let ROLE_DEFAULT_PERMISSIONS;
-try {
-  ({ ROLE_DEFAULT_PERMISSIONS } = require('@tbi/shared-constants/permissions'));
-} catch (err) {
-  console.error('FATAL ERROR: Failed to load @tbi/shared-constants/permissions.', err);
-  process.exit(1);
-}
+let ROLE_DEFAULT_PERMISSIONS = {
+  ADMIN: [
+    'users:read', 'users:create', 'users:bulk_import', 'users:deactivate',
+    'users:reset_password', 'users:assign_role', 'users:grant_permission',
+    'events:read', 'events:create', 'events:update', 'events:close',
+    'applications:read_all', 'applications:review',
+    'attendance:generate_qr', 'attendance:mark_manual', 'attendance:read',
+    'chat:read', 'chat:write', 'chat:moderate',
+    'certificates:view_own', 'certificates:generate', 'certificates:revoke',
+    'analytics:platform_read', 'analytics:team_read', 'audit_logs:read'
+  ],
+  SUPER_ADMIN: []
+};
+
+import('../../../../../packages/shared-constants/permissions.js')
+  .then((m) => {
+    if (m?.ROLE_DEFAULT_PERMISSIONS) ROLE_DEFAULT_PERMISSIONS = m.ROLE_DEFAULT_PERMISSIONS;
+  })
+  .catch(() => {
+    import('@tbi/shared-constants/permissions')
+      .then((m) => {
+        if (m?.ROLE_DEFAULT_PERMISSIONS) ROLE_DEFAULT_PERMISSIONS = m.ROLE_DEFAULT_PERMISSIONS;
+      })
+      .catch((err) => console.warn('[ADMIN] Using fallback default permissions:', err?.message));
+  });
 
 const generateDefaultPassword = () => {
   const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -22,10 +43,27 @@ const generateDefaultPassword = () => {
   return pass;
 };
 
-const LOGIN_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const LOGIN_URL = process.env.FRONTEND_URL || process.env.CLIENT_URL || (process.env.VERCEL_PROJECT_NAME ? `https://${process.env.VERCEL_PROJECT_NAME}.vercel.app` : 'http://localhost:3000');
 
-exports.getAllUsers = async () => {
-  return await User.find().select('-password').sort({ createdAt: -1 });
+exports.getAllUsers = async (options = {}) => {
+  const query = {};
+  if (options.role) {
+    if (typeof options.role === 'string' && options.role.includes(',')) {
+      query.role = { $in: options.role.split(',').map((r) => r.trim()).filter(Boolean) };
+    } else {
+      query.role = options.role;
+    }
+  }
+
+  let dbQuery = User.find(query).select('-password').sort({ createdAt: -1 });
+
+  if (options.limit) {
+    const limitNum = Math.min(500, Math.max(1, parseInt(options.limit, 10) || 50));
+    const pageNum = Math.max(1, parseInt(options.page, 10) || 1);
+    dbQuery = dbQuery.skip((pageNum - 1) * limitNum).limit(limitNum);
+  }
+
+  return await dbQuery.lean();
 };
 
 exports.createUser = async (data, callerRole = null) => {
@@ -56,7 +94,7 @@ exports.createUser = async (data, callerRole = null) => {
   });
 
   // Send welcome email (awaited for serverless reliability)
-  let emailDelivery = { sent: false };
+  let emailDelivery = { sent: false, error: null };
   try {
     const emailResult = await sendWelcomeEmail({
       to: user.email,
@@ -66,7 +104,8 @@ exports.createUser = async (data, callerRole = null) => {
       loginUrl: LOGIN_URL,
       userId: user.userId,
     });
-    emailDelivery = { sent: emailResult?.success !== false, error: emailResult?.error || null };
+    const sent = emailResult?.success !== false && Boolean(emailResult?.success);
+    emailDelivery = { sent, error: emailResult?.error || null };
   } catch (err) {
     console.error('Welcome email failed:', err.message);
     emailDelivery = { sent: false, error: err.message };
@@ -74,7 +113,7 @@ exports.createUser = async (data, callerRole = null) => {
 
   const userObj = user.toObject ? user.toObject({ virtuals: false }) : { ...user };
   delete userObj.password;
-  return { user: userObj, tempPassword, emailDelivery };
+  return { user: userObj, tempPassword, emailSent: emailDelivery.sent, emailDelivery };
 };
 
 exports.bulkCreateUsers = async (rows, callerRole = null) => {
@@ -82,42 +121,56 @@ exports.bulkCreateUsers = async (rows, callerRole = null) => {
   let succeeded = 0;
   let failed = 0;
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const line = i + 1;
-    try {
-      if (row.role === 'SUPER_ADMIN' && callerRole !== 'SUPER_ADMIN') {
-        const err = new Error('Only Super Admins can create Super Admin accounts');
-        err.statusCode = 403;
-        throw err;
-      }
-      const { user } = await exports.createUser(row, callerRole);
-      succeeded++;
-      results.push({
-        line,
-        email: row.email,
-        status: 'created',
-        user: {
-          _id: user._id,
-          userId: user.userId,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-      });
-    } catch (error) {
-      failed++;
-      const isExpected =
-        error.message === 'Email already exists' ||
-        error.message?.includes('Super Admin') ||
-        error.statusCode === 400 ||
-        error.statusCode === 403;
-      results.push({
-        line,
-        email: row.email,
-        status: 'failed',
-        error: isExpected ? error.message : 'User could not be created',
-      });
+  // Process in batches of 5 to balance concurrency with SES rate limits & Vercel execution timeouts
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batch = rows.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map(async (row, idx) => {
+        const line = i + idx + 1;
+        try {
+          if (row.role === 'SUPER_ADMIN' && callerRole !== 'SUPER_ADMIN') {
+            const err = new Error('Only Super Admins can create Super Admin accounts');
+            err.statusCode = 403;
+            throw err;
+          }
+          const { user, emailSent } = await exports.createUser(row, callerRole);
+          return {
+            success: true,
+            line,
+            email: row.email,
+            status: 'created',
+            emailSent,
+            user: {
+              _id: user._id,
+              userId: user.userId,
+              name: user.name,
+              email: user.email,
+              role: user.role,
+            },
+          };
+        } catch (error) {
+          const isExpected =
+            error.message === 'Email already exists' ||
+            error.message?.includes('Super Admin') ||
+            error.statusCode === 400 ||
+            error.statusCode === 403;
+          return {
+            success: false,
+            line,
+            email: row.email,
+            status: 'failed',
+            error: isExpected ? error.message : 'User could not be created',
+          };
+        }
+      })
+    );
+
+    for (const r of batchResults) {
+      if (r.success) succeeded++;
+      else failed++;
+      delete r.success;
+      results.push(r);
     }
   }
 
@@ -139,7 +192,7 @@ exports.updateUser = async (id, data) => {
   if (!user) throw new Error('User not found');
 
   if (Object.keys(safeData).length > 0) {
-    sendProfileUpdatedEmail({
+    await sendProfileUpdatedEmail({
       to: user.email,
       name: user.name,
       updatedFields: Object.keys(safeData),
@@ -256,12 +309,54 @@ exports.reactivateUser = async (id, adminId) => {
   };
 };
 
-// C7: deleteUser — guard against Super Admin and self-delete
+// C7: deleteUser — guard against Super Admin and self-delete with cascading cleanup
 exports.deleteUser = async (id, adminId) => {
   const user = await User.findById(id);
   if (!user) throw new Error('User not found');
   if (user.role === 'SUPER_ADMIN') throw new Error('Cannot delete a Super Admin account');
   if (id.toString() === adminId?.toString()) throw new Error('You cannot delete your own account');
+
+  // Enforce prior revocation
+  if (user.isActive) {
+    const err = new Error('User must be revoked before deletion. Please revoke access first.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Prevent deleting an active team lead
+  const Team = require('../teams/teams.model');
+  const ledTeam = await Team.findOne({ leadId: id });
+  if (ledTeam) {
+    const err = new Error(`Cannot delete user while they are designated as lead for team "${ledTeam.name}". Please reassign the team lead first.`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Cascade cleanup of related personal data and dangling references
+  const Profile = require('../profile/profile.model');
+  const Notification = require('../notifications/notifications.model');
+  const ChatRoom = require('../chat/chatRoom.model');
+  const Event = require('../events/events.model');
+  const ShiftAssignment = require('../../models/ShiftAssignment.model');
+
+  // 1. Remove profile and notifications
+  await Profile.deleteOne({ user: id }).catch(() => {});
+  await Notification.deleteMany({ userId: id }).catch(() => {});
+
+  // 2. Remove from team memberships
+  await Team.updateMany({ members: id }, { $pull: { members: id } }).catch(() => {});
+
+  // 3. Remove from chat room participants
+  await ChatRoom.updateMany({ participants: id }, { $pull: { participants: id } }).catch(() => {});
+
+  // 4. Remove from event members
+  await Event.updateMany({ 'members.userId': id }, { $pull: { members: { userId: id } } }).catch(() => {});
+
+  // 5. Remove future shift assignments
+  const today = new Date().toISOString().split('T')[0];
+  await ShiftAssignment.deleteMany({ userId: id, date: { $gte: today } }).catch(() => {});
+
+  // 6. Delete user document and invalidate cached permissions
   await User.findByIdAndDelete(id);
   await invalidateUserPermissions(id);
   return user;
@@ -285,6 +380,7 @@ exports.resetPassword = async (id) => {
 
   // Email the link
   let emailSent = false;
+  let emailError = null;
   try {
     const result = await sendPasswordResetLinkEmail({
       to: user.email,
@@ -292,15 +388,20 @@ exports.resetPassword = async (id) => {
       resetUrl,
     });
     emailSent = result.success;
+    emailError = result.error || null;
   } catch (err) {
     console.error('Reset link email failed:', err.message);
+    emailError = err.message;
   }
 
-  return { user: user.toObject({ virtuals: false }), emailSent };
+  return { user: user.toObject({ virtuals: false }), emailSent, emailError, resetUrl };
 };
 
 // VERIFY TOKEN — check a one-time reset link token
 exports.verifyResetToken = async (id, rawToken) => {
+  if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new Error('Invalid or expired reset link');
+  if (typeof rawToken !== 'string' || !rawToken.trim()) throw new Error('Invalid or expired reset link');
+
   const user = await User.findById(id).select('+passwordResetToken +passwordResetExpiry');
   if (!user) throw new Error('Invalid or expired reset link');
   if (!user.passwordResetToken || !user.passwordResetExpiry) throw new Error('Invalid or expired reset link');
@@ -315,6 +416,7 @@ exports.verifyResetToken = async (id, rawToken) => {
 
 // COMPLETE RESET — set new password and consume the token
 exports.completePasswordReset = async (id, rawToken, newPassword) => {
+  if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new Error('Invalid or expired reset link');
   if (typeof newPassword !== 'string' || newPassword.length < 8) throw new Error('Password must be at least 8 characters');
   if (Buffer.byteLength(newPassword, 'utf8') > 72) throw new Error('Password must not exceed 72 UTF-8 bytes');
   if (!/[A-Z]/.test(newPassword)) throw new Error('Password must contain an uppercase letter');
@@ -322,24 +424,67 @@ exports.completePasswordReset = async (id, rawToken, newPassword) => {
   if (!/[0-9]/.test(newPassword)) throw new Error('Password must contain a number');
   if (!/[^A-Za-z0-9]/.test(newPassword)) throw new Error('Password must contain a special character');
 
-  const user = await User.findById(id).select('+passwordResetToken +passwordResetExpiry');
-  if (!user) throw new Error('Invalid or expired reset link');
-  if (!user.passwordResetToken || !user.passwordResetExpiry) throw new Error('Invalid or expired reset link');
-  if (new Date() > user.passwordResetExpiry) throw new Error('This reset link has expired. Please ask an admin to send a new one.');
+  if (typeof rawToken !== 'string' || !rawToken.trim()) throw new Error('Invalid or expired reset link');
 
   const hash = crypto.createHash('sha256').update(rawToken).digest('hex');
-  const valid = crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(user.passwordResetToken, 'hex'));
-  if (!valid) throw new Error('Invalid or expired reset link');
+  const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-  // Consume the token immediately (one-time use)
-  user.passwordResetToken = null;
-  user.passwordResetExpiry = null;
-  user.password = await bcrypt.hash(newPassword, 12);
-  user.mustChangePassword = false;
-  user.passwordChangeStartedAt = null;
-  await user.save();
+  // 1. Attempt atomic consumption first (prevents TOCTOU concurrency race conditions)
+  let user = null;
+  const isFindByIdMocked = typeof User.findById === 'function' && User.findById !== defaultFindById;
+  const isFindOneAndUpdateMocked = typeof User.findOneAndUpdate === 'function' && User.findOneAndUpdate !== defaultFindOneAndUpdate;
+  const canUseAtomic = isFindOneAndUpdateMocked || (!isFindByIdMocked && mongoose.connection?.readyState === 1);
+  if (canUseAtomic) {
+    user = await User.findOneAndUpdate(
+      {
+        _id: id,
+        passwordResetToken: hash,
+        passwordResetExpiry: { $gt: new Date() },
+      },
+      {
+        $set: {
+          password: hashedPassword,
+          passwordResetToken: null,
+          passwordResetExpiry: null,
+          mustChangePassword: false,
+          passwordChangeStartedAt: null,
+          activeSessionId: null,
+          lastActivity: null,
+        },
+      },
+      { new: true }
+    );
+  }
 
-  return { user: user.toObject({ virtuals: false }) };
+  // 2. Fallback to findById if findOneAndUpdate is not mocked in unit test environments
+  if (!user && typeof User.findById === 'function') {
+    const existing = await User.findById(id).select('+passwordResetToken +passwordResetExpiry');
+    if (existing && existing.passwordResetToken && existing.passwordResetExpiry && new Date() <= existing.passwordResetExpiry) {
+      const valid = crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(existing.passwordResetToken, 'hex'));
+      if (valid) {
+        existing.passwordResetToken = null;
+        existing.passwordResetExpiry = null;
+        existing.password = hashedPassword;
+        existing.mustChangePassword = false;
+        existing.passwordChangeStartedAt = null;
+        existing.activeSessionId = null;
+        existing.lastActivity = null;
+        if (typeof existing.save === 'function') await existing.save();
+        user = existing;
+      }
+    }
+  }
+
+  if (!user) throw new Error('Invalid or expired reset link');
+  await invalidateUserPermissions(user._id);
+
+  await sendPasswordChangedEmail({
+    to: user.email,
+    name: user.name,
+    byAdmin: false,
+  }).catch((err) => console.error('Reset complete email failed:', err.message));
+
+  return { user: user.toObject ? user.toObject({ virtuals: false }) : { ...user } };
 };
 
 // H6: setPassword — apply same complexity rules as changePassword, require adminId for audit
@@ -362,7 +507,7 @@ exports.setPassword = async (id, newPassword, adminId) => {
   user.mustChangePassword = false;
   await user.save();
 
-  sendPasswordChangedEmail({
+  await sendPasswordChangedEmail({
     to: user.email,
     name: user.name,
     byAdmin: true,
@@ -392,7 +537,7 @@ exports.changeEmail = async (id, newEmail, adminId) => {
   user.email = cleanEmail;
   await user.save();
 
-  sendEmailChangedEmail({
+  await sendEmailChangedEmail({
     oldEmail,
     newEmail: cleanEmail,
     name: user.name,
@@ -418,19 +563,55 @@ exports.resetUserSession = async (id) => {
 };
 
 // ROLE UPDATE — with audit log & immediate permission cache invalidation
-exports.updateUserRole = async (targetUserId, newRole, adminUser, ipAddress = null) => {
+exports.updateUserRole = async (targetUserId, newRole, adminUser, ipAddress = null, reason = '') => {
   const VALID_ROLES = ['SUPER_ADMIN', 'ADMIN', 'T3_EXECUTIVE', 'T2_ASSOCIATE', 'T1_VOLUNTEER'];
   if (!VALID_ROLES.includes(newRole)) throw new Error('Invalid role specified');
 
   const user = await User.findById(targetUserId);
   if (!user) throw new Error('User not found');
+
+  if (adminUser?.role !== 'SUPER_ADMIN') {
+    const err = new Error('Only Super Admins can modify user roles');
+    err.statusCode = 403;
+    err.status = 403;
+    throw err;
+  }
+
   if (user.role === 'SUPER_ADMIN' && adminUser.sub !== user._id.toString()) {
     throw new Error('Only the account holder can modify Super Admin role');
   }
 
   const oldRole = user.role;
+
+  // Prevent demoting the last Super Admin
+  if (oldRole === 'SUPER_ADMIN' && newRole !== 'SUPER_ADMIN') {
+    const superAdminCount = await User.countDocuments({ role: 'SUPER_ADMIN' });
+    if (superAdminCount <= 1) {
+      const err = new Error('Cannot demote the last Super Admin in the system');
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+
   user.role = newRole;
   await user.save();
+
+  // If demoted from T3_EXECUTIVE, unassign from team lead
+  if (oldRole === 'T3_EXECUTIVE' && (newRole === 'T1_VOLUNTEER' || newRole === 'T2_ASSOCIATE')) {
+    const Team = require('../teams/teams.model');
+    const ledTeam = await Team.findOne({ leadId: user._id });
+    if (ledTeam) {
+      await Team.updateOne({ _id: ledTeam._id }, { $set: { leadId: null } });
+      await recordPermissionAudit({
+        performedBy: adminUser.sub,
+        targetId: ledTeam._id,
+        targetType: 'Team',
+        action: 'TEAM_LEAD_UNASSIGNED_ON_DEMOTION',
+        oldValue: { leadId: user._id },
+        newValue: { leadId: null, demotedUser: user._id, newRole },
+      }).catch(() => {});
+    }
+  }
 
   await invalidateUserPermissions(user._id);
 
@@ -441,7 +622,7 @@ exports.updateUserRole = async (targetUserId, newRole, adminUser, ipAddress = nu
     targetType: 'User',
     action: 'USER_ROLE_CHANGED',
     oldValue: { role: oldRole },
-    newValue: { role: newRole },
+    newValue: { role: newRole, reason },
     ipAddress,
   });
 

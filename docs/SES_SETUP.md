@@ -102,7 +102,7 @@ In your Vercel Project Settings (**Settings -> Environment Variables**), add the
 |---|---|---|
 | `EMAIL_HOST` | `email-smtp.ap-south-1.amazonaws.com` | SES SMTP endpoint matching your chosen AWS region. |
 | `EMAIL_PORT` | `587` | Port 587 (enforces STARTTLS) or 465 (direct TLS). |
-| `EMAIL_USER` | `AKIAIOSFODNN7EXAMPLE` | IAM Access Key ID printed by `ses-setup.ps1`. |
+| `EMAIL_USER` | `AKIA_SES_SMTP_ACCESS_KEY` | IAM Access Key ID printed by `ses-setup.ps1`. |
 | `EMAIL_PASS` | `BLa...derived...secret...` | Derived SigV4 SMTP password printed by `ses-setup.ps1`. |
 | `EMAIL_FROM` | `TBI Platform <noreply@tbi.org>` | Sender address matching verified domain identity. |
 | `USER_ID_PREFIX` | `TBI` | Prefix for sequential user ID generator (`TBI00001`). |

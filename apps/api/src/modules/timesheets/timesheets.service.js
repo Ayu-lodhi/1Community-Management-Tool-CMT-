@@ -168,6 +168,10 @@ class TimesheetService {
     }
     if (!isAdmin && !isTeamLead) throw new Error('Not authorized to update');
 
+    if (!isAdmin && ts.userId?.toString() === requester.sub?.toString()) {
+      throw new Error('Self-approval is not permitted. An administrator must review your timesheet.');
+    }
+
     ts.status = status;
     if (status === 'approved') {
       ts.approvedBy = requester.sub;

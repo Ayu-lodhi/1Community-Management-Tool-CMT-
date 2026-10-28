@@ -1,4 +1,5 @@
 const AuditLog = require('../models/AuditLog.model');
+const { redactObject } = require('../core/utils/logger');
 
 // Derive target entity type from action name
 const actionToTargetType = (action) => {
@@ -19,11 +20,11 @@ const auditLog = (action) => async (req, res, next) => {
           action,
           performedBy: req.user?.sub || null,
           performedByName: req.user?.name || req.user?.email || '',
-          targetId: req.params?.id || null,
+          targetId: req.params?.id || (action === 'PASSWORD_CHANGED' ? req.user?.sub : null),
           targetType: actionToTargetType(action),  // H4: dynamic, not hardcoded 'Event'
           ipAddress: req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || null,
-          details: {
-            body: req.body,
+          details: action === 'PASSWORD_CHANGED' ? {} : {
+            body: redactObject(req.body),
             params: req.params,
           },
           timestamp: new Date(),

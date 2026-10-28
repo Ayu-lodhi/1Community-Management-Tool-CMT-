@@ -1,4 +1,14 @@
 const authService = require('./auth.service');
+const captchaService = require('../../services/captcha.service');
+
+exports.getCaptcha = async (req, res) => {
+  try {
+    const challenge = await captchaService.createCaptchaChallenge();
+    res.status(200).json({ success: true, data: challenge });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to generate CAPTCHA challenge' });
+  }
+};
 
 exports.login = async (req, res) => {
   try {
@@ -21,6 +31,22 @@ exports.login = async (req, res) => {
     });
   } catch (error) {
     res.status(error.statusCode || 401).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    await authService.forgotPassword(email);
+    res.status(200).json({
+      success: true,
+      message: 'If an account exists with that email, a password reset link has been sent.',
+    });
+  } catch (error) {
+    res.status(error.statusCode || 400).json({
       success: false,
       message: error.message,
     });
@@ -67,10 +93,10 @@ exports.changeEmail = async (req, res) => {
 exports.changePassword = async (req, res) => {
   try {
     const { oldPassword, newPassword } = req.body;
-    await authService.changePassword(req.user, oldPassword, newPassword);
+    await authService.changePassword(req.user, oldPassword, newPassword, req);
     res.status(200).json({ success: true, message: 'Password changed successfully' });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    res.status(error.statusCode || 400).json({ success: false, message: error.message });
   }
 };
 

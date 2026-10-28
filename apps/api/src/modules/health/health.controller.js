@@ -27,6 +27,11 @@ async function checkRedisInstance(client) {
  * Returns strictly ok/not-ok per component.
  */
 async function getHealth(req, res) {
+  if (mongoose.connection.readyState !== 1 && process.env.MONGODB_URI) {
+    try {
+      await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
+    } catch (_) {}
+  }
   const mongoOk = mongoose.connection.readyState === 1 ? 'ok' : 'not-ok';
 
   const [cacheOk, pubsubOk, queueOk] = await Promise.all([
@@ -42,7 +47,8 @@ async function getHealth(req, res) {
     redis_queue: queueOk,
   };
 
-  const allHealthy = Object.values(components).every((status) => status === 'ok');
+  const redisRequired = process.env.ALLOW_NO_REDIS !== 'true';
+  const allHealthy = mongoOk === 'ok' && (!redisRequired || (cacheOk === 'ok' && pubsubOk === 'ok' && queueOk === 'ok'));
 
   return res.status(allHealthy ? 200 : 503).json({
     status: allHealthy ? 'ok' : 'degraded',

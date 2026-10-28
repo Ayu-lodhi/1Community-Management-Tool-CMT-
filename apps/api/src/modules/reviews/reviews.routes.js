@@ -5,7 +5,7 @@ const { protect, restrictTo } = require('../auth/auth.middleware');
 
 router.use(protect);
 
-router.get('/', controller.getAllReviews);
+router.get('/', restrictTo('ADMIN', 'SUPER_ADMIN', 'T3_EXECUTIVE'), controller.getAllReviews);
 router.get('/me', controller.getMyReviews);
 router.post('/', restrictTo('T3_EXECUTIVE', 'ADMIN', 'SUPER_ADMIN'), controller.createReview);
 

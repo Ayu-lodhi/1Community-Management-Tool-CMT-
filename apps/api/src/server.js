@@ -1,3 +1,4 @@
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '64';
 const dns = require('dns');
 dns.setDefaultResultOrder('ipv4first');
 
@@ -32,20 +33,25 @@ app.set('trust proxy', /^\d+$/.test(trustProxyConfig) ? parseInt(trustProxyConfi
 const isAllowedOrigin = (origin) => {
   if (!origin) return true;
   if (process.env.ALLOWED_ORIGINS) {
-    const list = process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim());
+    const list = process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean);
     if (list.includes(origin)) return true;
   }
-  if (/^https:\/\/.*\.vercel\.app$/.test(origin)) return true;
-  return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  if (process.env.CLIENT_URL && origin === process.env.CLIENT_URL) return true;
+  if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) return true;
+  if (process.env.VERCEL) {
+    const proj = process.env.VERCEL_PROJECT_NAME;
+    if (proj && (origin === `https://${proj}.vercel.app` || origin.startsWith(`https://${proj}-`))) return true;
+    if (process.env.VERCEL_URL && origin === `https://${process.env.VERCEL_URL}`) return true;
+  }
+  if (process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+    return true;
+  }
+  return false;
 };
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (isAllowedOrigin(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('CORS not allowed for origin: ' + origin));
-    }
+    callback(null, isAllowedOrigin(origin));
   },
   credentials: true,
 }));
@@ -79,7 +85,9 @@ app.use('/api/v1/stats', require('./modules/stats/stats.routes'));
 app.use('/api/v1/preferences', require('./modules/users/preferences.routes'));
 app.use('/api/v1/announcements', require('./modules/announcements/announcements.routes'));
 app.use('/api/v1/timesheets', require('./modules/timesheets/timesheets.routes'));
+app.use('/api/v1/workforce', require('./modules/workforce/workforce.routes'));
 app.use('/api/v1/profile', require('./modules/profile/profile.routes'));
+app.use('/api/v1/hr', require('./modules/hr/hr.routes'));
 app.patch('/api/v1/admin/users/:userId/tier', protect, restrictTo('ADMIN', 'SUPER_ADMIN'), createUserLimiter, require('./modules/profile/profile.controller').updateUserTier);
 
 app.get('/', publicCache(120), (req, res) => {
@@ -107,11 +115,20 @@ app.use((err, req, res, next) => {
 
 console.log('Connecting to MongoDB...');
 const MONGODB_URI = process.env.MONGODB_URI;
-if (mongoose.connection.readyState === 0 && MONGODB_URI) {
+if (process.env.NODE_ENV !== 'test' && mongoose.connection.readyState === 0 && MONGODB_URI) {
   mongoose
-    .connect(MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
+    .connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 10000,
+      maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE || '100', 10),
+      minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE || '10', 10),
+      waitQueueTimeoutMS: 5000,
+    })
     .then(async () => {
       console.log('MongoDB Connected');
+      try {
+        const Attendance = require('./modules/attendance/attendance.model');
+        await Attendance.collection.dropIndex('user_1_date_1').catch(() => {});
+      } catch (_) {}
       if (process.env.AUTO_SYNC_INDEXES === 'true') {
         try {
           const Attendance = require('./modules/attendance/attendance.model');

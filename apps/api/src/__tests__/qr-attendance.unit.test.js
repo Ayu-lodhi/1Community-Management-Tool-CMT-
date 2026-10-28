@@ -868,20 +868,15 @@ test('QR Attendance', { concurrency: 1 }, async (t) => {
   // --------------------------------------------------------------------------
   await t.test('Vercel Compatibility: Production serverless entrypoint registers attendance routes without errors', () => {
     process.env.VERCEL = '1';
-    const serverPath = path.resolve(__dirname, '../../../../apps/web/server/server.js');
+    const serverPath = path.resolve(__dirname, '../server.js');
     const app = require(serverPath);
     assert.ok(app, 'server.js must export an Express application');
 
+    const attendanceRouter = require('../modules/attendance/attendance.routes');
     const registeredPaths = [];
-    app._router.stack.forEach((layer) => {
+    attendanceRouter.stack.forEach((layer) => {
       if (layer.route) {
         registeredPaths.push(layer.route.path);
-      } else if (layer.name === 'router' && layer.handle.stack) {
-        layer.handle.stack.forEach((h) => {
-          if (h.route) {
-            registeredPaths.push(h.route.path);
-          }
-        });
       }
     });
 

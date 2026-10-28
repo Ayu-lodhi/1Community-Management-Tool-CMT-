@@ -51,10 +51,12 @@ const credentialFilter = (user) => ({
 });
 
 exports.consumeTemporaryPassword = (user) => User.findOneAndUpdate({
-  ...credentialFilter(user), mustChangePassword: true, passwordChangeStartedAt: null,
+  _id: user._id, isActive: true, role: user.role, password: user.password,
+  mustChangePassword: true,
+  'mfa.version': user.mfa?.version || { $exists: false },
 }, { $set: { passwordChangeStartedAt: new Date(), updatedAt: new Date() } },
 { new: true }).select('+password +mfa +passwordChangeStartedAt');
 
 exports.replacePassword = (user, password) => User.findOneAndUpdate(credentialFilter(user), {
-  $set: { password, mustChangePassword: false, passwordChangeStartedAt: null, tempPasswordExpiresAt: null, lastPasswordUpdatedAt: new Date(), updatedAt: new Date() },
+  $set: { password, mustChangePassword: false, passwordChangeStartedAt: null, tempPasswordExpiresAt: null, activeSessionId: null, lastActivity: null, lastPasswordUpdatedAt: new Date(), updatedAt: new Date() },
 }, { new: true });

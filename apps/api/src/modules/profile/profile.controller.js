@@ -244,13 +244,19 @@ exports.uploadAvatar = async (req, res, next) => {
     }
 
     const trimmed = avatarUrl.trim();
-    const isHttp = /^https?:\/\//i.test(trimmed);
     const isDataUrl = /^data:image\/(jpeg|png|webp);base64,/i.test(trimmed);
 
-    if (!isHttp && !isDataUrl) {
+    if (!isDataUrl) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid image format. Must be JPEG, PNG, or WebP.',
+        message: 'Invalid image format. Must be a base64 encoded JPEG, PNG, or WebP.',
+      });
+    }
+
+    if (Buffer.byteLength(trimmed, 'utf8') > 1.5 * 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        message: 'Image size exceeds maximum limit of 1.5MB.',
       });
     }
 

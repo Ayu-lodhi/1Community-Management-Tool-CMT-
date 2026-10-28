@@ -2,7 +2,7 @@
 // pages.jsx — All Page Components for TBI Management System
 // ====================================================================
 
-import React, { useState, createContext, useContext, useEffect, useRef, useCallback } from 'react';
+import React, { useState, createContext, useContext, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Navigate, NavLink, useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, ScrollText, Monitor, Settings, Shield, FileText,
@@ -15,286 +15,16 @@ import {
   Menu
 } from 'lucide-react';
 import api from './lib/api';
-import { io } from 'socket.io-client';
-import {
-  PieChart, Pie, BarChart, Bar, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  AreaChart, Area,
-} from 'recharts';
 
-const BACKEND_URL = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? '' : 'http://localhost:5000');
+const BACKEND_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? '' : 'http://localhost:5000');
 const API_BASE = `${BACKEND_URL}/api/v1`;
 
-// ====================================================================
-// AUTH CONTEXT
-// ====================================================================
-const AuthContext = createContext(null);
-export const useAuth = () => useContext(AuthContext);
-
-// ====================================================================
-// SOCKET CONTEXT
-// ====================================================================
-const SocketContext = createContext(null);
-export const useSocket = () => useContext(SocketContext);
-
-export const SocketProvider = ({ children }) => {
-  const { user } = useAuth();
-  const [socket, setSocket] = useState(null);
-
-  useEffect(() => {
-    if (!user) {
-      if (socket) {
-        socket.disconnect();
-        setSocket(null);
-      }
-      return;
-    }
-
-    const token = typeof window !== 'undefined' ? (sessionStorage.getItem('tbi_token') || localStorage.getItem('tbi_token')) : null;
-    if (!token) return;
-
-    const newSocket = io(BACKEND_URL || (typeof window !== 'undefined' ? window.location.origin : ''), {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionAttempts: 10,
-    });
-
-    newSocket.on('connect', () => {
-      console.log('Real-time connected');
-    });
-
-    newSocket.on('connect_error', (err) => {
-      console.warn('Socket connection error:', err.message);
-    });
-
-    setSocket(newSocket);
-
-    return () => {
-      newSocket.disconnect();
-    };
-  }, [user]);
-
-  return <SocketContext.Provider value={socket}>{children}</SocketContext.Provider>;
-};
-
-export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [initializing, setInitializing] = useState(true);
-
-  // Restore session from sessionStorage on mount (tab-isolated)
-  useEffect(() => {
-    try {
-      // If URL explicitly requests a fresh session, clear this tab's auth
-      if (typeof window !== 'undefined') {
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('new_session') === 'true') {
-          sessionStorage.removeItem('tbi_user');
-          sessionStorage.removeItem('tbi_token');
-          localStorage.removeItem('tbi_user');
-          localStorage.removeItem('tbi_token');
-          setInitializing(false);
-          return;
-        }
-      }
-
-      let storedUser = typeof window !== 'undefined' ? sessionStorage.getItem('tbi_user') : null;
-      let storedToken = typeof window !== 'undefined' ? sessionStorage.getItem('tbi_token') : null;
-
-      // Backward compatibility: migrate legacy single-session from localStorage to current tab's sessionStorage
-      if (!storedUser || !storedToken) {
-        const legacyUser = typeof window !== 'undefined' ? localStorage.getItem('tbi_user') : null;
-        const legacyToken = typeof window !== 'undefined' ? localStorage.getItem('tbi_token') : null;
-        if (legacyUser && legacyToken) {
-          storedUser = legacyUser;
-          storedToken = legacyToken;
-          sessionStorage.setItem('tbi_user', legacyUser);
-          sessionStorage.setItem('tbi_token', legacyToken);
-        }
-        // Remove from localStorage so subsequent new tabs start fresh with independent sessions
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('tbi_user');
-          localStorage.removeItem('tbi_token');
-        }
-      }
-
-      if (storedUser && storedToken) {
-        setUser(JSON.parse(storedUser));
-      }
-    } catch (err) {
-      console.error('Failed to restore session:', err);
-      if (typeof window !== 'undefined') {
-        sessionStorage.removeItem('tbi_user');
-        sessionStorage.removeItem('tbi_token');
-        localStorage.removeItem('tbi_user');
-        localStorage.removeItem('tbi_token');
-      }
-    } finally {
-      setInitializing(false);
-    }
-  }, []);
-
-  const login = (u, t) => {
-    setUser(u);
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('tbi_user', JSON.stringify(u));
-      sessionStorage.setItem('tbi_token', t);
-      // Clean localStorage so new tabs are not automatically forced into this account
-      localStorage.removeItem('tbi_user');
-      localStorage.removeItem('tbi_token');
-    }
-  };
-
-  const logout = useCallback(async () => {
-    try {
-      const token = typeof window !== 'undefined' ? (sessionStorage.getItem('tbi_token') || localStorage.getItem('tbi_token')) : null;
-      if (token) {
-        fetch(`${API_BASE}/auth/logout`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-        }).catch(() => {});
-      }
-    } catch {}
-    setUser(null);
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('tbi_user');
-      sessionStorage.removeItem('tbi_token');
-      localStorage.removeItem('tbi_user');
-      localStorage.removeItem('tbi_token');
-    }
-  }, []);
-
-  const updateUser = (updatedFields) => {
-    setUser((prev) => {
-      const next = { ...prev, ...updatedFields };
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem('tbi_user', JSON.stringify(next));
-      }
-      return next;
-    });
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, login, logout, initializing, updateUser }}>
-      {children}
-      {user && <IdleTimeoutWatcher logout={logout} />}
-    </AuthContext.Provider>
-  );
-};
-
-// ====================================================================
-// IDLE TIMEOUT WATCHER — Inactivity auto-logout
-// "if user is idle and not making any requests, auto log out from system"
-// ====================================================================
-const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes of inactivity
-const WARNING_WINDOW_MS = 60 * 1000;          // 60 seconds warning countdown
-
-export const IdleTimeoutWatcher = ({ logout }) => {
-  const [showWarning, setShowWarning] = useState(false);
-  const [secondsRemaining, setSecondsRemaining] = useState(60);
-  const lastActivityRef = useRef(Date.now());
-
-  const resetActivity = useCallback(() => {
-    lastActivityRef.current = Date.now();
-    setShowWarning(false);
-  }, []);
-
-  useEffect(() => {
-    const handleActivity = () => {
-      lastActivityRef.current = Date.now();
-    };
-
-    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click', 'wheel'];
-    events.forEach((ev) => window.addEventListener(ev, handleActivity, { passive: true }));
-    window.addEventListener('app:activity', handleActivity);
-
-    const interval = setInterval(() => {
-      const timeoutLimit =
-        (typeof window !== 'undefined' && window.__IDLE_TIMEOUT_MS) || DEFAULT_IDLE_TIMEOUT_MS;
-      const warningThreshold = Math.min(WARNING_WINDOW_MS, Math.floor(timeoutLimit / 2));
-      const idleTime = Date.now() - lastActivityRef.current;
-      const timeLeft = timeoutLimit - idleTime;
-
-      if (timeLeft <= 0) {
-        clearInterval(interval);
-        setShowWarning(false);
-        if (logout) logout();
-        if (typeof window !== 'undefined') {
-          sessionStorage.removeItem('tbi_user');
-          sessionStorage.removeItem('tbi_token');
-          window.location.href = '/login?reason=inactivity';
-        }
-      } else if (timeLeft <= warningThreshold) {
-        setShowWarning(true);
-        setSecondsRemaining(Math.max(1, Math.ceil(timeLeft / 1000)));
-      } else {
-        setShowWarning(false);
-      }
-    }, 1000);
-
-    return () => {
-      events.forEach((ev) => window.removeEventListener(ev, handleActivity));
-      window.removeEventListener('app:activity', handleActivity);
-      clearInterval(interval);
-    };
-  }, [logout]);
-
-  if (!showWarning) return null;
-
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
-      <div className="max-w-sm w-full bg-white rounded-2xl shadow-2xl border-2 border-amber-400 p-6 text-center animate-fade-in">
-        <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto mb-3 text-amber-600 shadow-inner">
-          <Clock className="w-7 h-7 animate-pulse" />
-        </div>
-        <h3 className="text-lg font-bold text-slate-900">Session Inactivity Warning</h3>
-        <p className="text-xs text-slate-500 mt-1 mb-4 leading-relaxed">
-          You have been idle for a while. To protect your account, your session will automatically end in:
-        </p>
-        <div className="inline-flex items-center justify-center px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl mb-5">
-          <span className="text-2xl font-mono font-black text-amber-700">
-            {secondsRemaining}s
-          </span>
-        </div>
-        <div className="flex gap-2 justify-center">
-          <button
-            type="button"
-            onClick={() => {
-              if (logout) logout();
-              window.location.href = '/login?reason=manual';
-            }}
-            className="px-4 py-2.5 rounded-xl border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-100 transition cursor-pointer"
-          >
-            Log Out Now
-          </button>
-          <button
-            type="button"
-            onClick={resetActivity}
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-sm cursor-pointer"
-          >
-            Stay Logged In
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-
-// ====================================================================
-// ROLES
-// ====================================================================
-export const ROLES = {
-  SUPER_ADMIN: { label: 'Super Admin', code: 'SA', color: '#DC2626', sidebarBg: '#0B1120', route: '/super-admin' },
-  ADMIN: { label: 'Admin', code: 'AD', color: '#0B5CAD', sidebarBg: '#0B1120', route: '/admin' },
-  T3_EXECUTIVE: { label: 'T3 Executive', code: 'T3', color: '#2563EB', sidebarBg: '#0B1120', route: '/t3' },
-  T2_ASSOCIATE: { label: 'T2 Associate', code: 'T2', color: '#0284C7', sidebarBg: '#0B1120', route: '/t2' },
-  T1_VOLUNTEER: { label: 'T1 Volunteer', code: 'T1', color: '#DC2626', sidebarBg: '#0B1120', route: '/t1' },
-};
+export {
+  AuthContext, useAuth,
+  SocketContext, useSocket, SocketProvider,
+  AuthProvider, IdleTimeoutWatcher, ROLES
+} from './context/AuthContext';
+import { useAuth, useSocket, ROLES } from './context/AuthContext';
 
 // ====================================================================
 // SIDEBAR MENUS
@@ -312,12 +42,15 @@ const MENUS = {
         { icon: Users, label: 'Users', to: '/admin/users' },
         { icon: UserPlus, label: 'Add User', to: '/admin/users/new' },
         { icon: Upload, label: 'Bulk Import', to: '/admin/users/bulk' },
+        { icon: Users, label: 'Member Operations', to: '/hr' },
       ]
     },
     {
       section: 'OPERATIONS', items: [
         { icon: Calendar, label: 'Events', to: '/admin/events' },
         { icon: UsersRound, label: 'Teams', to: '/admin/teams' },
+        { icon: Calendar, label: 'Workforce Roster', to: '/t3/workforce' },
+        { icon: FileCheck, label: 'Timesheet Approvals', to: '/t3/approvals' },
         { icon: FileCheck, label: 'Approval Requests', to: '/admin/applications' },
         { icon: MessageSquare, label: 'Team Chats', to: '/chat' },
         { icon: Bell, label: 'Announcements', to: '/announcements' },
@@ -346,12 +79,15 @@ const MENUS = {
         { icon: Users, label: 'Users', to: '/admin/users' },
         { icon: UserPlus, label: 'Add User', to: '/admin/users/new' },
         { icon: Upload, label: 'Bulk Import', to: '/admin/users/bulk' },
+        { icon: Users, label: 'Member Operations', to: '/hr' },
       ]
     },
     {
       section: 'OPERATIONS', items: [
         { icon: Calendar, label: 'Events', to: '/admin/events' },
         { icon: UsersRound, label: 'Teams', to: '/admin/teams' },
+        { icon: Calendar, label: 'Workforce Roster', to: '/t3/workforce' },
+        { icon: FileCheck, label: 'Timesheet Approvals', to: '/t3/approvals' },
         { icon: FileCheck, label: 'Approval Requests', to: '/admin/applications' },
         { icon: MessageSquare, label: 'Team Chats', to: '/chat' },
         { icon: Bell, label: 'Announcements', to: '/announcements' },
@@ -369,10 +105,14 @@ const MENUS = {
     {
       section: 'MY WORKSPACE', items: [
         { icon: LayoutDashboard, label: 'Dashboard', to: '/t3' },
+        { icon: Calendar, label: 'Shift Calendar', to: '/t3/workforce' },
+        { icon: FileCheck, label: 'Timesheet Approvals', to: '/t3/approvals' },
         { icon: UsersRound, label: 'My Teams', to: '/t3/teams' },
         { icon: Users, label: 'Team Profiles', to: '/profile/team' },
+        { icon: Award, label: 'Team Evaluations', to: '/hr' },
         { icon: FileCheck, label: 'Approval Requests', to: '/t3/applications' },
         { icon: CheckCircle, label: 'Attendance', to: '/t3/attendance' },
+        { icon: Clock, label: 'My Schedule', to: '/my-workforce' },
         { icon: Clock, label: 'Timesheets', to: '/timesheets' },
       ]
     },
@@ -395,6 +135,8 @@ const MENUS = {
     {
       section: 'MY WORKSPACE', items: [
         { icon: LayoutDashboard, label: 'Dashboard', to: '/t2' },
+        { icon: Award, label: 'My Scorecard', to: '/scorecard' },
+        { icon: Calendar, label: 'My Schedule & Timesheet', to: '/my-workforce' },
         { icon: Calendar, label: 'Browse Events', to: '/t2/events' },
         { icon: FileCheck, label: 'Approval Requests', to: '/t2/applications' },
         { icon: Clock, label: 'My Shifts', to: '/t2/shifts' },
@@ -419,6 +161,8 @@ const MENUS = {
     {
       section: 'MY WORKSPACE', items: [
         { icon: LayoutDashboard, label: 'Dashboard', to: '/t1' },
+        { icon: Award, label: 'My Scorecard', to: '/scorecard' },
+        { icon: Calendar, label: 'My Schedule & Timesheet', to: '/my-workforce' },
         { icon: Calendar, label: 'Browse Events', to: '/t1/events' },
         { icon: FileCheck, label: 'Approval Requests', to: '/t1/applications' },
         { icon: QrCode, label: 'QR Check-In', to: '/t1/checkin' },
@@ -481,58 +225,46 @@ const DemoLoginBar = import.meta.env.DEV
 export const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mfaChallenge, setMfaChallenge] = useState(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [captchaChallenge, setCaptchaChallenge] = useState(null);
+  const [captchaAnswer, setCaptchaAnswer] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showMuralOnMobile, setShowMuralOnMobile] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState('');
-  const captchaContainerRef = useRef(null);
-  const captchaWidgetIdRef = useRef(null);
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState('');
+  const [forgotError, setForgotError] = useState('');
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const logoutReason = new URLSearchParams(location.search).get('reason');
-  const SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
 
-  // Load reCAPTCHA script and render widget
-  useEffect(() => {
-    if (!SITE_KEY) return;
-    const SCRIPT_ID = 'recaptcha-script';
-    const renderWidget = () => {
-      if (captchaContainerRef.current && captchaWidgetIdRef.current === null && window.grecaptcha) {
-        captchaWidgetIdRef.current = window.grecaptcha.render(captchaContainerRef.current, {
-          sitekey: SITE_KEY,
-          callback: (token) => setCaptchaToken(token),
-          'expired-callback': () => setCaptchaToken(''),
-          'error-callback': () => setCaptchaToken(''),
-        });
+  const fetchCaptcha = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/captcha`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setCaptchaChallenge(json.data);
+        setCaptchaAnswer('');
       }
-    };
-    if (!document.getElementById(SCRIPT_ID)) {
-      const script = document.createElement('script');
-      script.id = SCRIPT_ID;
-      script.src = 'https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit';
-      script.async = true;
-      script.defer = true;
-      window.onRecaptchaLoad = renderWidget;
-      document.head.appendChild(script);
-    } else if (window.grecaptcha?.render) {
-      renderWidget();
-    } else {
-      window.onRecaptchaLoad = renderWidget;
+    } catch (err) {
+      console.error('Failed to load CAPTCHA challenge:', err);
     }
-    return () => {
-      // Cleanup: reset widget ref so it can re-render if component re-mounts
-      captchaWidgetIdRef.current = null;
-    };
-  }, [SITE_KEY]);
+  }, []);
+
+  useEffect(() => {
+    fetchCaptcha();
+  }, [fetchCaptcha]);
 
   const performLogin = async (loginEmail, loginPassword) => {
     setError('');
     setLoading(true);
     try {
-      // Reject early if CAPTCHA is enabled but token not yet obtained
-      if (SITE_KEY && !captchaToken) {
-        setError('Please complete the CAPTCHA before signing in.');
+      if (captchaChallenge && !captchaAnswer.trim()) {
+        setError('Please enter the security verification code.');
         setLoading(false);
         return;
       }
@@ -540,45 +272,67 @@ export const Login = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          identifier: loginEmail,
-          email: loginEmail,
+          identifier: (loginEmail || '').trim(),
+          email: (loginEmail || '').trim(),
           password: loginPassword,
-          ...(captchaToken ? { 'g-recaptcha-response': captchaToken } : {}),
+          captchaId: captchaChallenge?.captchaId,
+          captchaAnswer: captchaAnswer.trim(),
         }),
       });
       let data;
       try {
         data = await res.json();
       } catch {
-        throw new Error('Unable to connect to the server. Please try again shortly.');
+        if (res.status === 503) {
+          throw new Error('Database or server initializing (503). Please retry in 5 seconds.');
+        }
+        if (res.status === 404) {
+          throw new Error('API route not found (404). Please check server routing.');
+        }
+        throw new Error(`Server returned error status ${res.status}. Please try again.`);
       }
       if (!data.success) {
-        const err = new Error(data.message || 'Login failed');
+        const err = new Error(data.error || data.message || 'Login failed');
         err.status = res.status;
         throw err;
+      }
+      if (data.data?.mfaRequired && data.data?.challengeToken) {
+        setMfaChallenge(data.data.challengeToken);
+        setMfaCode('');
+        setLoading(false);
+        return;
+      }
+      if (data.data?.mustChangePassword) {
+        const token = data.data.passwordChangeToken || data.data.accessToken;
+        if (token) {
+          sessionStorage.setItem('tbi_token', token);
+        }
+        navigate('/change-password', { replace: true, state: { forced: true } });
+        return;
+      }
+      if (!data.data?.user) {
+        throw new Error('Invalid server response during sign in. Please try again.');
       }
       login(data.data.user, data.data.accessToken);
       navigate(ROLES[data.data.user.role].route);
     } catch (err) {
       const raw = err?.message || '';
-      if (err.status === 409 || /already logged in/i.test(raw)) {
+      if (/temporary password|password replacement/i.test(raw)) {
+        setError(raw);
+      } else if (err.status === 409 || /already logged in/i.test(raw)) {
         setError(raw || 'This account is already logged in on another device');
-      } else if (/invalid|incorrect|credential|password|email/i.test(raw) && !/server|init|import|syntax|failed/i.test(raw)) {
+      } else if (/invalid|incorrect|credential|password|email/i.test(raw) && !/server|init|import|syntax|failed|validation|missing|config/i.test(raw)) {
         setError('Invalid username or password. Please verify your credentials.');
       } else if (/rate limit|too many/i.test(raw)) {
         setError('Too many login attempts. Please wait a moment and try again.');
       } else if (/inactive|blocked|disabled|suspended/i.test(raw)) {
         setError('Your account is inactive. Please contact the administrator.');
       } else if (/captcha/i.test(raw)) {
-        setError('CAPTCHA verification failed. Please try again.');
+        setError(raw || 'CAPTCHA verification failed. Please try again.');
       } else {
         setError(raw || 'Unable to sign in right now. Please try again in a few moments.');
       }
-      // Reset CAPTCHA widget so user can try again
-      if (SITE_KEY && captchaWidgetIdRef.current !== null && window.grecaptcha) {
-        window.grecaptcha.reset(captchaWidgetIdRef.current);
-        setCaptchaToken('');
-      }
+      void fetchCaptcha();
     } finally {
       setLoading(false);
     }
@@ -587,6 +341,87 @@ export const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     await performLogin(email, password);
+  };
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setForgotError('');
+    setForgotMessage('');
+    if (!forgotEmail.trim() || !forgotEmail.includes('@')) {
+      setForgotError('Please enter a valid email address.');
+      return;
+    }
+    setForgotLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setForgotMessage(data.message || 'If an account exists, a reset link has been sent.');
+      } else {
+        setForgotError(data.message || 'Failed to send reset link.');
+      }
+    } catch {
+      setForgotError('Network error. Please try again.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleVerifyMfa = async (e) => {
+    e.preventDefault();
+    setError('');
+    const code = mfaCode.trim();
+    if (code.length !== 6) {
+      setError('Please enter a valid 6-digit verification code.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/mfa/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          challengeToken: mfaChallenge,
+          code,
+        }),
+      });
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        if (res.status === 503) {
+          throw new Error('Database or server initializing (503). Please retry in 5 seconds.');
+        }
+        if (res.status === 404) {
+          throw new Error('API route not found (404). Please check server routing.');
+        }
+        throw new Error(`Server returned error status ${res.status}. Please try again.`);
+      }
+      if (!data.success) {
+        throw new Error(data.message || 'MFA verification failed');
+      }
+      if (data.data?.mustChangePassword && data.data?.passwordChangeToken) {
+        sessionStorage.setItem('tbi_token', data.data.passwordChangeToken);
+        navigate('/change-password', { replace: true, state: { forced: true } });
+        return;
+      }
+      login(data.data.user, data.data.accessToken);
+      navigate(ROLES[data.data.user.role].route);
+    } catch (err) {
+      const raw = err?.message || '';
+      if (/expired/i.test(raw)) {
+        setError('Verification challenge expired. Please enter your credentials again.');
+        setMfaChallenge(null);
+      } else {
+        setError(raw || 'Invalid verification code. Please check your authenticator and try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const emailHasValue = email.trim().length > 0;
@@ -687,53 +522,105 @@ export const Login = () => {
             </div>
 
             {/* Form */}
-            <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-3.5">
-              {/* Field 1: User ID or Email */}
-              <div>
-                <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
-                  User ID or Email
-                </label>
-                <div className="relative flex items-center bg-white border-[2.5px] border-[#1B5299] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
-                  <span className="pl-3 text-slate-500 shrink-0">
-                    <UserIcon className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-                  </span>
-                  <input
-                    type="text"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="User ID or Email"
-                    required
-
-                    className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
-                  />
-                  <div className="pr-3 shrink-0">
-                    <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${emailHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+            <form onSubmit={mfaChallenge ? handleVerifyMfa : handleSubmit} className="space-y-3 sm:space-y-3.5">
+              {mfaChallenge ? (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide">
+                      Two-Factor Authentication Code
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => { setMfaChallenge(null); setMfaCode(''); setError(''); }}
+                      className="text-xs text-[#1B5299] hover:underline font-['Space_Mono',monospace]"
+                    >
+                      Cancel
+                    </button>
                   </div>
-                </div>
-              </div>
-
-              {/* Field 2: Password */}
-              <div>
-                <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
-                  Password
-                </label>
-                <div className="relative flex items-center bg-white border-[2.5px] border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:border-[#1B5299] focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
-                  <span className="pl-3 text-slate-500 shrink-0">
-                    <Lock className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-                  </span>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Password"
-                    required
-                    className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
-                  />
-                  <div className="pr-3 shrink-0">
-                    <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${passHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+                  <div className="relative flex items-center bg-white border-[2.5px] border-[#1B5299] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all">
+                    <span className="pl-3 text-slate-500 shrink-0">
+                      <Key className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-[#1B5299]" />
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      autoFocus
+                      value={mfaCode}
+                      onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                      placeholder="6-digit code"
+                      required
+                      className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-base tracking-widest text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-3 font-bold text-center"
+                    />
                   </div>
+                  <p className="text-[11px] text-slate-500 mt-1 font-['Space_Mono',monospace]">
+                    Enter the code from your authenticator app
+                  </p>
                 </div>
-              </div>
+              ) : (
+                <>
+                  {/* Field 1: User ID or Email */}
+                  <div>
+                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
+                      User ID or Email
+                    </label>
+                    <div className="relative flex items-center bg-white border-[2.5px] border-[#1B5299] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
+                      <span className="pl-3 text-slate-500 shrink-0">
+                        <UserIcon className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                      </span>
+                      <input
+                        type="text"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="User ID or Email"
+                        required
+                        className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
+                      />
+                      <div className="pr-3 shrink-0">
+                        <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${emailHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Field 2: Password */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide">
+                        Password
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForgotEmail(email.includes('@') ? email : '');
+                          setForgotError('');
+                          setForgotMessage('');
+                          setShowForgotModal(true);
+                        }}
+                        className="font-['Space_Mono',monospace] text-[11px] text-[#1B5299] hover:underline cursor-pointer"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
+                    <div className="relative flex items-center bg-white border-[2.5px] border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:border-[#1B5299] focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
+                      <span className="pl-3 text-slate-500 shrink-0">
+                        <Lock className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                      </span>
+                      <input
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Password"
+                        required
+                        className="flex-1 min-w-0 bg-transparent font-['Space_Mono',monospace] text-xs sm:text-sm text-[#1A1A1A] placeholder-[#8A8A8A] outline-none py-2 sm:py-2.5 px-2.5 font-medium"
+                      />
+                      <div className="pr-3 shrink-0">
+                        <span className={`inline-block w-2.5 h-2.5 rounded-full border border-slate-400 ${passHasValue ? 'bg-[#10B981]' : 'bg-transparent'}`} />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Inactivity & Expiry notices */}
               {logoutReason === 'inactivity' && !error && (
@@ -760,6 +647,12 @@ export const Login = () => {
                   <span>Session expired. Please sign in again.</span>
                 </div>
               )}
+              {location.state?.successMessage && !error && (
+                <div className="p-2.5 bg-emerald-50 border-2 border-emerald-500 shadow-[2px_2px_0px_0px_#1A1A1A] rounded-lg text-xs text-emerald-950 font-['Space_Mono',monospace] font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{location.state.successMessage}</span>
+                </div>
+              )}
 
               {/* Error notice */}
               {error && (
@@ -769,10 +662,35 @@ export const Login = () => {
                 </div>
               )}
 
-              {/* reCAPTCHA Widget — only rendered when VITE_RECAPTCHA_SITE_KEY is set */}
-              {SITE_KEY && (
-                <div className="flex justify-center pt-1">
-                  <div ref={captchaContainerRef} />
+              {/* Security CAPTCHA Challenge */}
+              {captchaChallenge && !mfaChallenge && (
+                <div className="pt-0.5">
+                  <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
+                    Security Verification
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="rounded-lg overflow-hidden border-[2px] border-[#1E3A52] shadow-[2px_2px_0px_0px_#1A1A1A] shrink-0"
+                      dangerouslySetInnerHTML={{ __html: captchaChallenge.svg }}
+                    />
+                    <button
+                      type="button"
+                      onClick={fetchCaptcha}
+                      title="New CAPTCHA code"
+                      className="h-[48px] w-10 flex items-center justify-center bg-[#E4DDD0] hover:bg-[#D5CBB8] text-[#1A1A1A] border-2 border-[#1A1A1A] rounded-lg shadow-[2px_2px_0px_0px_#1A1A1A] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition cursor-pointer shrink-0"
+                    >
+                      <RefreshCw className="w-4 h-4 text-slate-700" />
+                    </button>
+                    <input
+                      type="text"
+                      value={captchaAnswer}
+                      onChange={(e) => setCaptchaAnswer(e.target.value.toUpperCase())}
+                      placeholder="Code"
+                      maxLength={5}
+                      required
+                      className="flex-1 min-w-0 h-[48px] bg-white border-[2.5px] border-[#1A1A1A] rounded-lg shadow-[2px_2px_0px_0px_#1A1A1A] font-['Space_Mono',monospace] font-bold text-center text-sm tracking-widest uppercase py-2 px-2 outline-none focus:border-[#1B5299]"
+                    />
+                  </div>
                 </div>
               )}
 
@@ -783,7 +701,7 @@ export const Login = () => {
                   disabled={loading}
                   className="w-full bg-[#C8322B] hover:bg-[#B32720] text-white font-['Barlow_Condensed',sans-serif] font-black text-xl sm:text-2xl uppercase tracking-wider py-2.5 sm:py-3 px-6 border-[2.5px] border-[#1A1A1A] shadow-[4px_4px_0px_0px_#1A1A1A] hover:shadow-[2px_2px_0px_0px_#1A1A1A] hover:translate-x-[2px] hover:translate-y-[2px] active:shadow-none active:translate-x-[4px] active:translate-y-[4px] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-center"
                 >
-                  {loading ? 'Accessing...' : 'Sign In'}
+                  {loading ? 'Processing...' : (mfaChallenge ? 'Verify & Sign In' : 'Sign In')}
                 </button>
               </div>
 
@@ -800,6 +718,94 @@ export const Login = () => {
             </form>
           </div>
         </div>
+
+        {/* Forgot Password Modal */}
+        {showForgotModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <div className="relative w-full max-w-md bg-[#FAF8F5] border-[3px] border-[#1A1A1A] rounded-2xl shadow-[6px_6px_0px_0px_#1A1A1A] p-6 text-left">
+              <div className="flex items-center justify-between pb-3 mb-4 border-b-2 border-[#1A1A1A]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-lg bg-[#EBF3FA] border-2 border-[#1A1A1A] flex items-center justify-center text-[#1B5299]">
+                    <Key className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-['Barlow_Condensed',sans-serif] font-black text-xl text-[#1A1A1A] uppercase tracking-wide leading-none">
+                      Reset Password
+                    </h3>
+                    <p className="font-['Space_Mono',monospace] text-[11px] text-[#555] mt-0.5">
+                      We'll send a 1-hour secure link to your email
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotModal(false)}
+                  className="text-slate-500 hover:text-[#1A1A1A] p-1 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {forgotMessage ? (
+                <div className="space-y-4">
+                  <div className="p-3 bg-emerald-50 border-2 border-emerald-600 rounded-xl text-emerald-900 font-['Space_Mono',monospace] text-xs font-bold flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <span>{forgotMessage}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotModal(false)}
+                    className="w-full py-2.5 bg-[#1B5299] hover:bg-[#15427D] text-white border-2 border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl font-['Barlow_Condensed',sans-serif] font-black uppercase text-sm cursor-pointer"
+                  >
+                    Back to Sign In
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleForgotPassword} className="space-y-4">
+                  {forgotError && (
+                    <div className="p-2.5 bg-red-50 border-2 border-[#C8322B] rounded-xl text-xs text-[#C8322B] font-['Space_Mono',monospace] font-bold">
+                      {forgotError}
+                    </div>
+                  )}
+                  <div>
+                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs text-[#1A1A1A] uppercase tracking-wide mb-1">
+                      Account Email
+                    </label>
+                    <div className="relative flex items-center bg-white border-[2px] border-[#1A1A1A] shadow-[2px_2px_0px_0px_#1A1A1A] rounded-xl">
+                      <span className="pl-3 text-slate-500 shrink-0">
+                        <Mail className="w-4 h-4" />
+                      </span>
+                      <input
+                        type="email"
+                        value={forgotEmail}
+                        onChange={(e) => setForgotEmail(e.target.value)}
+                        placeholder="name@domain.com"
+                        required
+                        className="flex-1 bg-transparent font-['Space_Mono',monospace] text-xs text-[#1A1A1A] py-2 px-2.5 outline-none font-medium"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotModal(false)}
+                      className="px-4 py-2 border-2 border-[#1A1A1A] rounded-xl font-['Barlow_Condensed',sans-serif] font-bold uppercase text-sm text-[#1A1A1A] hover:bg-slate-100 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      className="px-5 py-2 bg-[#1B5299] hover:bg-[#15427D] text-white border-2 border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl font-['Barlow_Condensed',sans-serif] font-black uppercase text-sm cursor-pointer disabled:opacity-50"
+                    >
+                      {forgotLoading ? 'Sending...' : 'Send Reset Link'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
@@ -825,8 +831,9 @@ export const Sidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const socket = useSocket();
-  const cfg = ROLES[user.role];
-  const menus = MENUS[user.role];
+  const role = user?.role || 'T1_VOLUNTEER';
+  const cfg = ROLES[role] || ROLES.T1_VOLUNTEER;
+  const menus = MENUS[role] || MENUS.T1_VOLUNTEER;
 
   // Dynamic notification counts
   const [badges, setBadges] = useState({
@@ -1004,7 +1011,7 @@ export const Sidebar = () => {
                 {cfg.code}
               </div>
               <div className="min-w-0">
-                <p className="text-white text-sm font-medium truncate">{user.name}</p>
+                <p className="text-white text-sm font-medium truncate">{user?.name || 'User'}</p>
                 <span className="text-[10px] text-white/80">{cfg.label}</span>
               </div>
             </div>
@@ -1094,7 +1101,8 @@ export const Topbar = () => {
   const { setMobileOpen } = useLayout();
   const navigate = useNavigate();
   const socket = useSocket();
-  const cfg = ROLES[user.role];
+  const role = user?.role || 'T1_VOLUNTEER';
+  const cfg = ROLES[role] || ROLES.T1_VOLUNTEER;
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
@@ -1177,13 +1185,13 @@ export const Topbar = () => {
         >
           <div
             className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-xs"
-            style={{ backgroundColor: cfg.color }}
+            style={{ backgroundColor: cfg?.color || '#0B5CAD' }}
           >
-            {user.name.charAt(0)}
+            {user?.name ? user.name.charAt(0) : 'U'}
           </div>
           <div className="hidden sm:block text-left">
-            <p className="text-sm font-medium text-gray-800 leading-tight truncate max-w-[120px]">{user.name}</p>
-            <p className="text-[11px] text-gray-500 leading-tight">{cfg.label}</p>
+            <p className="text-sm font-medium text-gray-800 leading-tight truncate max-w-[120px]">{user?.name || 'User'}</p>
+            <p className="text-[11px] text-gray-500 leading-tight">{cfg?.label || 'User'}</p>
           </div>
         </div>
       </div>
@@ -1244,74 +1252,14 @@ export const Layout = ({ children }) => {
   );
 };
 
-// ====================================================================
-// SHARED
-// ====================================================================
-export const Kpi = ({ label, value, change }) => (
-  <div className="bg-white p-3.5 sm:p-5 rounded-xl border border-gray-200 hover:shadow-md transition-shadow min-w-0">
-    <p className="text-xs sm:text-sm text-gray-500 truncate">{label}</p>
-    <p className="text-xl sm:text-2xl md:text-3xl font-bold mt-1 sm:mt-2 truncate text-gray-900">{value}</p>
-    {change && <p className="text-[10px] sm:text-xs text-green-500 mt-1">+{change}</p>}
-  </div>
-);
-export const KPI = Kpi;
-
-// ====================================================================
-// ANNOUNCEMENT BANNER — Shows on dashboards when there are new announcements
-// ====================================================================
-export const AnnouncementBanner = () => {
-  const navigate = useNavigate();
-  const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    const fetchCount = async () => {
-      try {
-        const res = await api.get('/announcements');
-        const recent = (res.data.data || []).filter((a) => {
-          const created = new Date(a.createdAt).getTime();
-          const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-          return created > weekAgo;
-        });
-        setCount(recent.length);
-      } catch (err) {
-        // Silent
-      }
-    };
-    void fetchCount();
-  }, []);
-
-  if (count === 0) return null;
-
-  return (
-    <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl p-4 flex items-center justify-between text-white">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
-          <Bell className="w-5 h-5" />
-        </div>
-        <div>
-          <p className="font-semibold text-sm">
-            {count} new announcement{count > 1 ? 's' : ''} this week
-          </p>
-          <p className="text-xs opacity-90">Check what's happening on the platform</p>
-        </div>
-      </div>
-      <button
-        onClick={() => navigate('/announcements')}
-        className="px-4 py-2 bg-white text-indigo-600 rounded-lg font-medium text-sm hover:bg-indigo-50 whitespace-nowrap"
-      >
-        View All
-      </button>
-    </div>
-  );
-};
-
-export const Placeholder = ({ title }) => (
-  <div className="flex flex-col items-center justify-center h-96 text-center">
-    <Construction className="w-16 h-16 text-gray-300 mb-4" />
-    <h2 className="text-2xl font-bold mb-2">{title}</h2>
-    <p className="text-gray-500">This page is under construction</p>
-  </div>
-);
+export {
+  Kpi, KPI, AnnouncementBanner, Placeholder,
+  Skeleton, SkeletonCard, SkeletonTable, SkeletonCardGrid
+} from './components/common/CommonUI';
+import {
+  Kpi, KPI, AnnouncementBanner, Placeholder,
+  Skeleton, SkeletonCard, SkeletonTable, SkeletonCardGrid
+} from './components/common/CommonUI';
 
 export const ProtectedRoute = ({ children, roles }) => {
   const { user, initializing } = useAuth();
@@ -1334,7 +1282,8 @@ export const ProtectedRoute = ({ children, roles }) => {
 
   if (!user || !hasToken) return <Navigate to="/login" replace />;
   if (roles && !roles.includes(user.role)) {
-    return <Navigate to={ROLES[user.role].route} replace />;
+    const targetRoute = ROLES[user?.role]?.route || '/login';
+    return <Navigate to={targetRoute} replace />;
   }
   return <Layout>{children}</Layout>;
 };
@@ -1343,277 +1292,6 @@ export const ProtectedRoute = ({ children, roles }) => {
 // ====================================================================
 // DASHBOARDS
 // ====================================================================
-export const AdminDashboard = () => {
-  const { user } = useAuth();
-  const [stats, setStats] = useState(null);
-  const [tiers, setTiers] = useState(null);
-  const [trend, setTrend] = useState([]);
-  const [attendance, setAttendance] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const [statsRes, tiersRes, trendRes, attendRes] = await Promise.all([
-          api.get('/stats/admin'),
-          api.get('/stats/users-by-tier'),
-          api.get('/stats/applications-trend'),
-          api.get('/stats/attendance'),
-        ]);
-        setStats(statsRes.data.data);
-        setTiers(tiersRes.data.data);
-        setTrend(trendRes.data.data);
-        setAttendance(attendRes.data.data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <Skeleton className="h-72 rounded-xl" />
-          <Skeleton className="h-72 rounded-xl" />
-        </div>
-      </div>
-    );
-  }
-
-  const tierPieData = tiers ? [
-    { name: 'T1 Volunteers', value: tiers.T1 || 0, color: '#059669', fill: '#059669' },
-    { name: 'T2 Associates', value: tiers.T2 || 0, color: '#0284C7', fill: '#0284C7' },
-    { name: 'T3 Executives', value: tiers.T3 || 0, color: '#7C3AED', fill: '#7C3AED' },
-    { name: 'Admins', value: (tiers.Admin || 0) + (tiers.SuperAdmin || 0), color: '#DC2626', fill: '#DC2626' },
-  ].filter((d) => d.value > 0) : [];
-
-  return (
-    <div className="space-y-6">
-      <AnnouncementBanner />
-      <div>
-        <h1 className="text-2xl font-bold">Good morning, {user.name.split(' ')[0]}</h1>
-        <p className="text-gray-500">Here's what's happening today.</p>
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <Kpi label="Total Users" value={stats?.totalUsers ?? 0} />
-        <Kpi label="Active Events" value={stats?.activeEvents ?? 0} />
-        <Kpi label="Approval Rate" value={`${stats?.approvalRate ?? 0}%`} />
-        <Kpi label="Teams" value={stats?.totalTeams ?? 0} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 min-w-0 overflow-hidden">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <Users className="w-5 h-5 text-gray-500" /> Users by Tier
-          </h3>
-          {tierPieData.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">
-              No users yet
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
-                <Pie
-                  data={tierPieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={3}
-                  dataKey="value"
-                  label={({ name, value }) => `${name}: ${value}`}
-                  labelLine={false}
-                />
-
-
-
-
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 min-w-0 overflow-hidden">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-gray-500" /> Applications (Last 7 Days)
-          </h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={trend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="day" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-              <Line type="monotone" dataKey="count" stroke="#0EA5E9" strokeWidth={3} dot={{ r: 5, fill: '#0EA5E9' }} activeDot={{ r: 7 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-gray-200">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <CheckCircle className="w-5 h-5 text-gray-500" /> Attendance Today
-          </h3>
-          {!attendance || attendance.total === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">
-              No check-ins today
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart
-                data={[
-                  { status: 'Present', count: attendance.present, fill: '#10B981' },
-                  { status: 'Late', count: attendance.late, fill: '#F59E0B' },
-                  { status: 'Absent', count: attendance.absent, fill: '#EF4444' },
-                ]}
-                margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="status" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-                <Bar dataKey="count" radius={[8, 8, 0, 0]} />
-
-
-
-
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <FileText className="w-5 h-5 text-gray-500" /> Application Status
-          </h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart
-              data={[
-                { status: 'Pending', count: stats.pendingApplications },
-                { status: 'Approved', count: stats.approvedApplications },
-                { status: 'Rejected', count: stats.rejectedApplications },
-              ]}
-              layout="vertical"
-              margin={{ top: 10, right: 20, left: 10, bottom: 0 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis type="number" tick={{ fontSize: 12 }} allowDecimals={false} />
-              <YAxis dataKey="status" type="category" tick={{ fontSize: 12 }} />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-              <Bar dataKey="count" radius={[0, 8, 8, 0]} fill="#0EA5E9" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export const SuperAdminDashboard = () => {
-  const { user } = useAuth();
-  const [stats, setStats] = useState(null);
-  const [tiers, setTiers] = useState(null);
-  const [trend, setTrend] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const [statsRes, tiersRes, trendRes] = await Promise.all([
-          api.get('/stats/super-admin'),
-          api.get('/stats/users-by-tier'),
-          api.get('/stats/applications-trend'),
-        ]);
-        setStats(statsRes.data.data);
-        setTiers(tiersRes.data.data);
-        setTrend(trendRes.data.data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
-        </div>
-      </div>
-    );
-  }
-
-  const tierPieData = tiers ? [
-    { name: 'T1', value: tiers.T1 || 0, color: '#059669', fill: '#059669' },
-    { name: 'T2', value: tiers.T2 || 0, color: '#0284C7', fill: '#0284C7' },
-    { name: 'T3', value: tiers.T3 || 0, color: '#7C3AED', fill: '#7C3AED' },
-    { name: 'Admin', value: (tiers.Admin || 0) + (tiers.SuperAdmin || 0), color: '#DC2626', fill: '#DC2626' },
-  ].filter((d) => d.value > 0) : [];
-
-  return (
-    <div className="space-y-6">
-      <AnnouncementBanner />
-      <div>
-        <h1 className="text-2xl font-bold">Welcome, {user.name}</h1>
-        <p className="text-gray-500">Full system overview and admin actions.</p>
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <Kpi label="Admins" value={stats?.admins ?? 0} />
-        <Kpi label="Total Users" value={stats?.totalUsers ?? 0} />
-        <Kpi label="Active Events" value={stats?.activeEvents ?? 0} />
-        <Kpi label="Check-ins Today" value={stats?.sessionsToday ?? 0} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 min-w-0 overflow-hidden">
-          <h3 className="font-semibold mb-4">Users by Tier</h3>
-          {tierPieData.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">No data</div>
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie data={tierPieData} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={3} dataKey="value" />
-
-
-
-
-                <Tooltip />
-                <Legend wrapperStyle={{ fontSize: '12px' }} iconType="circle" />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 min-w-0 overflow-hidden">
-          <h3 className="font-semibold mb-4">Applications (7 Days)</h3>
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={trend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="day" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-              <Bar dataKey="count" fill="#EF4444" radius={[8, 8, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 export const T1Dashboard = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -1667,14 +1345,29 @@ export const T1Dashboard = () => {
     <div className="space-y-6 max-w-2xl">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Hi {user.name.split(' ')[0]}</h1>
+        <h1 className="text-2xl font-bold">Hi {user?.name ? user.name.split(' ')[0] : 'Volunteer'}</h1>
         <p className="text-gray-500">
           {todayStatusMessage}
-
-
-
-
         </p>
+      </div>
+
+      {/* My Workforce & Timesheet Shortcut */}
+      <div className="bg-gradient-to-r from-emerald-600 to-teal-700 rounded-xl p-5 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Calendar className="w-5 h-5 text-emerald-200" />
+            <h3 className="font-bold text-base">Weekly Shifts & Day Timesheet</h3>
+          </div>
+          <p className="text-xs text-emerald-100 max-w-md">
+            Check your scheduled shifts, assigned team tasks, and log your daily work hours with overtime reporting.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/my-workforce')}
+          className="px-4 py-2 bg-white text-emerald-800 font-semibold text-xs rounded-lg shadow-sm hover:bg-emerald-50 transition shrink-0 cursor-pointer"
+        >
+          Open Schedule & Timesheet →
+        </button>
       </div>
 
       {/* Today's status card */}
@@ -1750,15 +1443,15 @@ export const T1Dashboard = () => {
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
-        <Kpi label="Applications" value={stats.myApplications} />
-        <Kpi label="Approved" value={stats.approved} />
-        <Kpi label="Certificates" value={stats.certificates} />
+        <Kpi label="Applications" value={safeStats.myApplications ?? 0} />
+        <Kpi label="Approved" value={safeStats.approved ?? 0} />
+        <Kpi label="Certificates" value={safeStats.certificates ?? 0} />
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        <Kpi label="Pending" value={stats.pending} />
-        <Kpi label="Days Attended" value={stats.attendanceDays} />
-        <Kpi label="My Teams" value={stats.myTeams} />
+        <Kpi label="Pending" value={safeStats.pending ?? 0} />
+        <Kpi label="Days Attended" value={safeStats.attendanceDays ?? 0} />
+        <Kpi label="My Teams" value={safeStats.myTeams ?? 0} />
       </div>
     </div>
   );
@@ -1845,7 +1538,15 @@ export const UserManagement = () => {
       setUsers([res.data.data, ...users]);
       setModal(false);
       setForm({ name: '', email: '', phone: '', role: 'T1_VOLUNTEER' });
-      alert(`User created!\n\nAn email with login credentials has been sent to ${res.data.data.email}.`);
+      if (res.data?.emailSent === false) {
+        const errorMsg = res.data?.emailError ? `\n\nDelivery Error: ${res.data.emailError}` : '';
+        const credsMsg = res.data?.tempPassword
+          ? `\n\nLogin Credentials:\nUser ID / Email: ${res.data.data.userId || res.data.data.email}\nTemporary Password: ${res.data.tempPassword}\n\nPlease share these credentials directly with ${res.data.data.name}. They will be prompted to set a new password on first login.`
+          : '';
+        alert(`User created, but welcome email could not be sent (SMTP not configured or failed).${errorMsg}${credsMsg}\n\nPlease check email provider settings in Vercel.`);
+      } else {
+        alert(`User created!\n\nAn email with login credentials has been sent to ${res.data.data.email}.`);
+      }
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to create user');
     } finally {
@@ -1859,11 +1560,15 @@ export const UserManagement = () => {
     if (!confirm(`Send a secure password reset link to ${u.name}?\n\nA one-time link will be emailed to: ${u.email}\nThe link will expire in 1 hour.`)) return;
     try {
       const res = await api.post(`/admin/users/${u._id}/reset-password`);
-      const { emailSent } = res.data;
+      const { emailSent, emailError, resetUrl } = res.data;
       if (emailSent) {
         alert(`Reset link sent!\n\nA secure one-time password reset link has been emailed to:\n${u.email}\n\nThe link expires in 1 hour and can only be used once.`);
       } else {
-        alert(`Reset link generated but email delivery failed.\n\nPlease try again or contact your email provider.`);
+        const errorDetail = emailError ? `\n\nDelivery Error: ${emailError}` : '';
+        const linkMsg = resetUrl
+          ? `\n\nOne-time reset link:\n${resetUrl}\n\nYou can copy and share this link directly with ${u.name} (valid for 1 hour).\n\nTip: You can also click "Set Password" on their row to set their password directly.`
+          : `\n\nPlease try again or use the "Set Password" button to set their password directly.`;
+        alert(`Reset link generated but email delivery failed.${errorDetail}${linkMsg}`);
       }
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to send reset link');
@@ -2247,8 +1952,15 @@ export const UserManagement = () => {
                   <option value="T1_VOLUNTEER">T1 Volunteer</option>
                   <option value="T2_ASSOCIATE">T2 Associate</option>
                   <option value="T3_EXECUTIVE">T3 Executive</option>
+                  {canManageAccess && <option value="ADMIN">Admin</option>}
                 </select>
               </div>
+              {form.role === 'ADMIN' && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-start gap-2">
+                  <Shield size={14} className="mt-0.5 flex-shrink-0" />
+                  <span>Admin accounts receive standard default administrative permissions upon creation. Custom permission overrides can be configured immediately after creation using &ldquo;Manage Permissions&rdquo;.</span>
+                </div>
+              )}
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 flex items-start gap-2">
                 <Info size={14} className="mt-0.5 flex-shrink-0" />
                 <span>Login credentials will be emailed to the user automatically.</span>
@@ -3772,12 +3484,10 @@ export const EventsPage = () => {
   const fetchData = async () => {
     try {
       const promises = [api.get('/events')];
-      if (canCreate) promises.push(api.get('/admin/users'));
       if (canApply) promises.push(api.get('/applications/me'));
 
       const results = await Promise.all(promises);
       setEvents(results[0].data.data);
-      if (canCreate) setUsers(results[1].data.data);
       if (canApply) setMyApplications(results[1].data.data);
     } catch (err) {
       console.error(err);
@@ -3787,6 +3497,13 @@ export const EventsPage = () => {
   };
 
   useEffect(() => { void fetchData(); }, []);
+
+  // Defer fetching users for Event Head selector until Create Event modal opens
+  useEffect(() => {
+    if (modal && canCreate && users.length === 0) {
+      api.get('/admin/users').then((res) => setUsers(res.data?.data || [])).catch(console.error);
+    }
+  }, [modal, canCreate, users.length]);
 
   // Open apply modal → fetch teams for this event
   const openApplyModal = async (ev) => {
@@ -4759,6 +4476,13 @@ export const AttendancePage = () => {
 
   // --- T3 Link & QR Generator State ---
   const [durationMinutes, setDurationMinutes] = useState(10);
+  const [sessionLabel, setSessionLabel] = useState('');
+  const [geoEnabled, setGeoEnabled] = useState(false);
+  const [radiusM, setRadiusM] = useState(100); // 100m default, options: 30, 50, 100
+  const [venueCoords, setVenueCoords] = useState(null);
+  const [capturingGeo, setCapturingGeo] = useState(false);
+  const [rollingEnabled, setRollingEnabled] = useState(false);
+  const [rollingInfo, setRollingInfo] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [generatedLink, setGeneratedLink] = useState(null);
   const [countdownMs, setCountdownMs] = useState(null);
@@ -4814,6 +4538,27 @@ export const AttendancePage = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // Poll rolling code if enabled on active link
+  useEffect(() => {
+    if (!generatedLink?.token || !generatedLink?.rolling?.enabled || !generatedLink.active) {
+      setRollingInfo(null);
+      return;
+    }
+
+    const fetchRolling = async () => {
+      try {
+        const res = await api.get(`/attendance/link/${generatedLink.token}/rolling`);
+        setRollingInfo(res.data.data);
+      } catch (err) {
+        console.warn('Failed to fetch rolling code:', err.message);
+      }
+    };
+
+    fetchRolling();
+    const interval = setInterval(fetchRolling, 3000);
+    return () => clearInterval(interval);
+  }, [generatedLink?.token, generatedLink?.rolling?.enabled, generatedLink?.active]);
+
   // Live countdown timer for active generated link
   useEffect(() => {
     if (!generatedLink?.expiresAt || !generatedLink.active) {
@@ -4834,16 +4579,62 @@ export const AttendancePage = () => {
     return () => clearInterval(interval);
   }, [generatedLink?.expiresAt, generatedLink?.active]);
 
+  const handleCaptureVenue = () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser');
+      return;
+    }
+    setCapturingGeo(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setVenueCoords({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        });
+        setCapturingGeo(false);
+      },
+      (err) => {
+        alert(`Failed to capture location: ${err.message}`);
+        setCapturingGeo(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
   // Handle generating new link & QR
   const handleGenerateLink = async (e) => {
     e?.preventDefault();
     setGenerating(true);
     setGenError('');
+    if (geoEnabled && !venueCoords) {
+      setGenError('Please wait for GPS venue coordinates to be acquired before generating a geofenced session.');
+      setGenerating(false);
+      return;
+    }
     try {
-      const res = await api.post('/attendance/link/generate', { minutes: durationMinutes });
+      const payload = {
+        minutes: durationMinutes,
+        sessionLabel: sessionLabel.trim(),
+      };
+      if (geoEnabled && venueCoords) {
+        payload.geo = {
+          enabled: true,
+          lat: venueCoords.lat,
+          lng: venueCoords.lng,
+          radiusM: radiusM,
+          maxAccuracyM: 100,
+        };
+      }
+      if (rollingEnabled) {
+        payload.rolling = {
+          enabled: true,
+          stepSeconds: 30,
+        };
+      }
+      const res = await api.post('/attendance/link/generate', payload);
       setGeneratedLink(res.data.data);
       setCopied(false);
-      // Refresh panel in case stats changed
       void fetchPanelData();
     } catch (err) {
       setGenError(err.response?.data?.message || err.message || 'Failed to generate link');
@@ -5110,6 +4901,81 @@ export const AttendancePage = () => {
                     </div>
                   </div>
 
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 uppercase mb-1.5">
+                      Session Name / Slot (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Morning Briefing, Workshop 1"
+                      value={sessionLabel}
+                      onChange={(e) => setSessionLabel(e.target.value)}
+                      className="w-full h-10 px-3.5 rounded-xl border border-gray-300 outline-none focus:border-indigo-500 text-xs font-medium text-slate-800"
+                    />
+                  </div>
+
+                  {/* Geofencing & Rolling Toggles */}
+                  <div className="pt-2 border-t border-gray-100 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={geoEnabled}
+                          onChange={(e) => {
+                            setGeoEnabled(e.target.checked);
+                            if (e.target.checked && !venueCoords) handleCaptureVenue();
+                          }}
+                          className="rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>Geofence Venue</span>
+                      </label>
+                      {geoEnabled && (
+                        <div className="flex gap-1 text-[11px]">
+                          {[100, 50, 30].map((r) => (
+                            <button
+                              key={r}
+                              type="button"
+                              onClick={() => setRadiusM(r)}
+                              className={`px-2 py-0.5 rounded font-semibold border ${
+                                radiusM === r
+                                  ? 'bg-indigo-600 text-white border-indigo-600'
+                                  : 'bg-gray-50 text-gray-600 border-gray-200'
+                              }`}
+                            >
+                              {r}m{r === 100 ? ' (Def)' : ''}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {geoEnabled && (
+                      <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600 flex items-center justify-between">
+                        <span>{venueCoords ? `Venue Set (±${Math.round(venueCoords.accuracy)}m)` : 'GPS coordinates not set'}</span>
+                        <button
+                          type="button"
+                          onClick={handleCaptureVenue}
+                          disabled={capturingGeo}
+                          className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800"
+                        >
+                          {capturingGeo ? 'Locating...' : venueCoords ? 'Re-capture' : 'Capture My GPS'}
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={rollingEnabled}
+                          onChange={(e) => setRollingEnabled(e.target.checked)}
+                          className="rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>Rolling QR Code (30s OTP)</span>
+                      </label>
+                    </div>
+                  </div>
+
                   <button
                     type="submit"
                     disabled={generating}
@@ -5175,6 +5041,13 @@ export const AttendancePage = () => {
                           className="w-56 h-56 object-contain"
                         />
                       </div>
+                      {rollingInfo?.code && (
+                        <div className="w-full max-w-xs mb-3 p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-center">
+                          <span className="text-[10px] font-mono uppercase font-bold text-indigo-600 tracking-wider">Presenter Live Code</span>
+                          <div className="text-3xl font-mono font-black text-indigo-700 tracking-widest mt-0.5">{rollingInfo.code}</div>
+                          <p className="text-[11px] text-indigo-600 mt-1">Changes in {rollingInfo.secondsRemaining}s</p>
+                        </div>
+                      )}
                       <p className="text-xs text-gray-500 mb-4">Scan with camera to open attendance page</p>
 
                       {/* Link URL with Copy */}
@@ -5312,6 +5185,41 @@ export const AttendancePage = () => {
               </div>
             </div>
 
+            {/* Multi-Session Daily Breakdown */}
+            {panelData?.sessions && panelData.sessions.length > 0 && (
+              <div className="border border-indigo-100 rounded-xl bg-indigo-50/40 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Timer className="w-4 h-4 text-indigo-600" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-900">
+                      Today's Attendance Sessions ({panelData.sessions.length})
+                    </h3>
+                  </div>
+                  <span className="text-[11px] text-indigo-600 font-medium">Multiple sessions active</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {panelData.sessions.map((s, idx) => (
+                    <div key={s.id || idx} className="p-3 bg-white rounded-xl border border-indigo-100 shadow-2xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800 truncate">{s.sessionLabel || `Session ${idx + 1}`}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${s.active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                          {s.active ? 'ACTIVE' : 'ENDED'}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                        <span>Started: {new Date(s.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="font-bold text-indigo-600">{s.presentCount} present</span>
+                      </div>
+                      <div className="mt-1 flex gap-1 text-[10px] text-slate-400">
+                        {s.geoEnabled && <span className="bg-blue-50 text-blue-700 px-1 rounded">Geo {s.radiusM}m</span>}
+                        {s.rollingEnabled && <span className="bg-purple-50 text-purple-700 px-1 rounded">Rolling</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Two Side-by-Side Panels: Present vs Absent Members */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
               {/* Present Members Table */}
@@ -5332,7 +5240,14 @@ export const AttendancePage = () => {
                           {m.name.charAt(0)}
                         </div>
                         <div>
-                          <p className="text-xs font-bold text-slate-800">{m.name}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-xs font-bold text-slate-800">{m.name}</p>
+                            {m.sessionLabel && (
+                              <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium">
+                                {m.sessionLabel}
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[11px] text-gray-400">{m.email}</p>
                         </div>
                       </div>
@@ -5750,6 +5665,8 @@ export const AttendPage = () => {
   const [marking, setMarking] = useState(false);
   const [successData, setSuccessData] = useState(null);
   const [timeLeft, setTimeLeft] = useState(null);
+  const [inputCode, setInputCode] = useState('');
+  const [acquiringLocation, setAcquiringLocation] = useState(false);
 
   const fetchLink = async () => {
     if (!token) return;
@@ -5794,15 +5711,61 @@ export const AttendPage = () => {
     if (marking) return;
     setMarking(true);
     setError('');
+
+    let payload = {};
+
+    if (linkInfo?.rolling?.enabled) {
+      if (!inputCode.trim() || inputCode.trim().length !== 6) {
+        setError('Please enter the full 6-character session code shown on the screen.');
+        setMarking(false);
+        return;
+      }
+      payload.code = inputCode.trim().toUpperCase();
+    }
+
+    if (linkInfo?.geo?.enabled) {
+      if (!navigator.geolocation) {
+        setError('Geolocation is not supported by your browser. Please ask your T3 lead to mark you manually.');
+        setMarking(false);
+        return;
+      }
+
+      setAcquiringLocation(true);
+      let pos;
+      try {
+        pos = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0,
+          });
+        });
+      } catch (geoErr) {
+        setAcquiringLocation(false);
+        setMarking(false);
+        let msg = 'Failed to acquire location.';
+        if (geoErr.code === 1) msg = 'Location access was denied. Please enable location permissions or request manual attendance from your T3 executive.';
+        else if (geoErr.code === 2) msg = 'Location signal unavailable. Please move near a window or outdoors and retry.';
+        else if (geoErr.code === 3) msg = 'Location request timed out. Please retry with a stronger GPS or network connection.';
+        setError(msg);
+        return;
+      }
+      setAcquiringLocation(false);
+
+      payload.lat = pos.coords.latitude;
+      payload.lng = pos.coords.longitude;
+      payload.accuracy = pos.coords.accuracy;
+    }
+
     try {
-      const res = await api.post(`/attendance/link/${token}/mark`, {});
+      const res = await api.post(`/attendance/link/${token}/mark`, payload);
       setSuccessData(res.data.data);
-      // Refresh status
       await fetchLink();
     } catch (err) {
       setError(err.response?.data?.message || err.message || 'Failed to mark attendance');
     } finally {
       setMarking(false);
+      setAcquiringLocation(false);
     }
   };
 
@@ -5934,11 +5897,38 @@ export const AttendPage = () => {
                 )}
               </div>
 
+              {/* Verification Requirements Badges */}
+              {linkInfo.geo?.enabled && (
+                <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 text-xs text-blue-800 flex items-center gap-2">
+                  <MapPin className="w-4 h-4 shrink-0 text-blue-600" />
+                  <span>Venue Geofence active (within {linkInfo.geo.radiusM || 100}m). Location will be verified on click.</span>
+                </div>
+              )}
+
+              {linkInfo.rolling?.enabled && !isAlreadyMarked && !isExpired && !isNotStarted && (
+                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                    6-Character Session Code
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={inputCode}
+                    onChange={(e) => setInputCode(e.target.value.toUpperCase())}
+                    placeholder="e.g. 8K2X9L"
+                    className="w-full text-center font-mono font-black text-xl tracking-widest px-3 py-2 border border-slate-300 rounded-lg outline-none focus:border-indigo-600 bg-white text-slate-900"
+                  />
+                  <p className="text-[11px] text-slate-500 text-center">
+                    Enter the code displayed on the presenter's screen
+                  </p>
+                </div>
+              )}
+
               {/* Already marked indicator */}
               {isAlreadyMarked && (
                 <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-center text-xs font-semibold text-emerald-700 flex items-center justify-center gap-1.5">
                   <Check className="w-4 h-4" />
-                  <span>You have already marked attendance for today!</span>
+                  <span>You have already marked attendance for this session!</span>
                 </div>
               )}
             </div>
@@ -5950,10 +5940,15 @@ export const AttendPage = () => {
               <button
                 type="button"
                 onClick={handleMarkAttendance}
-                disabled={marking}
+                disabled={marking || acquiringLocation}
                 className="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold rounded-xl transition duration-150 shadow-lg shadow-emerald-900/20 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer text-base"
               >
-                {marking ? (
+                {acquiringLocation ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Acquiring GPS Signal...</span>
+                  </>
+                ) : marking ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     <span>Verifying on Server...</span>
@@ -6413,7 +6408,7 @@ export const AdminManagementPage = () => {
   useEffect(() => {
     (async () => {
       try {
-        const res = await api.get('/admin/users');
+        const res = await api.get('/admin/users?role=ADMIN,SUPER_ADMIN');
         // Filter to only admin-level accounts
         setAdmins((res.data.data || []).filter((u) =>
           ['ADMIN', 'SUPER_ADMIN'].includes(u.role)
@@ -6474,170 +6469,6 @@ export const AdminManagementPage = () => {
           </table>
           </div>
         )}
-      </div>
-    </div>
-  );
-};
-
-// ====================================================================
-// ANALYTICS
-// ====================================================================
-export const AnalyticsPage = () => {
-  const [stats, setStats] = useState(null);
-  const [tiers, setTiers] = useState(null);
-  const [monthly, setMonthly] = useState([]);
-  const [top, setTop] = useState([]);
-  const [attendance, setAttendance] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const [statsRes, tiersRes, monthlyRes, topRes, attendRes] = await Promise.all([
-          api.get('/stats/admin'),
-          api.get('/stats/users-by-tier'),
-          api.get('/stats/monthly-applications'),
-          api.get('/stats/top-performers'),
-          api.get('/stats/attendance'),
-        ]);
-        setStats(statsRes.data.data);
-        setTiers(tiersRes.data.data);
-        setMonthly(monthlyRes.data.data);
-        setTop(topRes.data.data);
-        setAttendance(attendRes.data.data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
-        </div>
-        <Skeleton className="h-80 rounded-xl" />
-      </div>
-    );
-  }
-
-  const tierPieData = [
-    { name: 'T1', value: tiers.T1, color: '#059669', fill: '#059669' },
-    { name: 'T2', value: tiers.T2, color: '#0284C7', fill: '#0284C7' },
-    { name: 'T3', value: tiers.T3, color: '#7C3AED', fill: '#7C3AED' },
-    { name: 'Admin', value: tiers.Admin + tiers.SuperAdmin, color: '#DC2626', fill: '#DC2626' },
-  ].filter((d) => d.value > 0);
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Analytics</h1>
-        <p className="text-gray-500">Insights and trends across the platform</p>
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi label="Total Users" value={stats.totalUsers} />
-        <Kpi label="Active Events" value={stats.activeEvents} />
-        <Kpi label="Approval Rate" value={`${stats.approvalRate}%`} />
-        <Kpi label="Today Attendance" value={attendance ? `${attendance.rate}%` : '—'} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-gray-200">
-          <h3 className="font-semibold mb-4">User Distribution</h3>
-          {tierPieData.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">No data</div>
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie data={tierPieData} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value" />
-
-
-
-
-                <Tooltip />
-                <Legend wrapperStyle={{ fontSize: '12px' }} iconType="circle" />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200 lg:col-span-2">
-          <h3 className="font-semibold mb-4">Applications — Last 12 Months</h3>
-          <ResponsiveContainer width="100%" height={260}>
-            <AreaChart data={monthly} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="colorApps" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#0EA5E9" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="#0EA5E9" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
-              <Area type="monotone" dataKey="count" stroke="#0EA5E9" strokeWidth={2.5} fillOpacity={1} fill="url(#colorApps)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-gray-200">
-          <h3 className="font-semibold mb-4">Today's Attendance</h3>
-          {!attendance || attendance.total === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">No check-ins today</div>
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie
-                  data={[
-                    { name: 'Present', value: attendance.present, fill: '#10B981' },
-                    { name: 'Late', value: attendance.late, fill: '#F59E0B' },
-                    { name: 'Absent', value: attendance.absent, fill: '#EF4444' },
-                  ]}
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={90}
-                  dataKey="value"
-                  label={({ name, value }) => `${name}: ${value}`}
-                />
-
-
-
-
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200">
-          <h3 className="font-semibold mb-4">Top Performers</h3>
-          {top.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-sm text-gray-400">No performance data yet</div>
-          ) : (
-            <div className="space-y-3">
-              {top.map((u, i) => (
-                <div key={u.userId} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0 ${i === 0 ? 'bg-amber-500' : i === 1 ? 'bg-gray-400' : i === 2 ? 'bg-amber-700' : 'bg-blue-500'
-                      }`}>{i + 1}</span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{u.name}</p>
-                      <p className="text-xs text-gray-500 truncate">{u.approvedCount} approved / {u.attendanceCount} days present</p>
-                    </div>
-                  </div>
-                  <div className="text-sm font-bold text-amber-600 flex-shrink-0">{u.score} pts</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
@@ -6795,6 +6626,7 @@ export const BulkImportPage = () => {
     setProgress(0);
 
     let succeeded = 0;
+    let emailFailedCount = 0;
     const importErrors = [];
     const BATCH_SIZE = 25; // Sized to fit comfortably within Vercel serverless function limits
 
@@ -6815,6 +6647,9 @@ export const BulkImportPage = () => {
           const origRow = chunk[idx];
           if (resRow.status === 'created') {
             succeeded++;
+            if (resRow.emailSent === false) {
+              emailFailedCount++;
+            }
           } else {
             importErrors.push({ line: origRow._line, error: resRow.error || 'Failed' });
           }
@@ -6833,7 +6668,7 @@ export const BulkImportPage = () => {
     if (importErrors.length > 0) {
       console.warn('Import errors:', importErrors);
     }
-    setImportResult({ succeeded, failed: importErrors.length, errors: importErrors });
+    setImportResult({ succeeded, failed: importErrors.length, emailFailedCount, errors: importErrors });
   };
 
   const reset = () => {
@@ -6971,6 +6806,7 @@ export const BulkImportPage = () => {
             {importResult ? importResult.succeeded : validRows.length} users created successfully
             {importResult && importResult.failed > 0 ? `, ${importResult.failed} failed` : ''}
             {invalidRows.length > 0 ? `, ${invalidRows.length} invalid rows skipped` : ''}
+            {importResult && importResult.emailFailedCount > 0 ? ` (${importResult.emailFailedCount} created without email delivery)` : ''}
           </p>
           <div className="flex gap-3 justify-center">
             <button className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Download Report</button>
@@ -6999,23 +6835,26 @@ export const TeamsPage = () => {
   const [memberSearch, setMemberSearch] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Fetch teams + users on mount
+  // Fetch teams on mount
   useEffect(() => {
     (async () => {
       try {
-        const [teamsRes, usersRes] = await Promise.all([
-          api.get('/teams'),
-          canManage ? api.get('/admin/users') : Promise.resolve({ data: { data: [] } }),
-        ]);
-        setTeams(teamsRes.data.data);
-        setUsers(usersRes.data.data);
+        const teamsRes = await api.get('/teams');
+        setTeams(teamsRes.data?.data || []);
       } catch (err) {
         console.error(err);
       } finally {
         setLoading(false);
       }
     })();
-  }, [canManage]);
+  }, []);
+
+  // Defer fetching users until Create or Member management modals are opened
+  useEffect(() => {
+    if ((createModal || detailModal || addMemberModal) && canManage && users.length === 0) {
+      api.get('/admin/users').then((res) => setUsers(res.data?.data || [])).catch(console.error);
+    }
+  }, [createModal, detailModal, addMemberModal, canManage, users.length]);
 
   // Create team
   const createTeam = async (e) => {
@@ -7317,42 +7156,77 @@ export const TeamsPage = () => {
 // MY SHIFTS
 // ====================================================================
 export const MyShiftsPage = () => {
-  const shifts = [
-    { _id: '1', event: 'Annual Tech Fest 2026', role: 'Tech Team', date: 'Oct 15, 2026', time: '9:00 AM - 1:00 PM', status: 'upcoming' },
-    { _id: '2', event: 'Startup Pitch Day', role: 'Registration', date: 'Nov 5, 2026', time: '10:00 AM - 4:00 PM', status: 'upcoming' },
-    { _id: '3', event: 'Design Sprint', role: 'Media Team', date: 'Sep 20, 2026', time: '2:00 PM - 6:00 PM', status: 'completed' },
-  ];
-  const statusColor = {
-    upcoming: 'bg-blue-100 text-blue-700',
-    completed: 'bg-green-100 text-green-700',
-    missed: 'bg-red-100 text-red-700',
-  };
+  const [teams, setTeams] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchAssignments = async () => {
+      try {
+        const res = await api.get('/teams/me');
+        if (mounted) {
+          const list = Array.isArray(res.data?.data) ? res.data.data : (Array.isArray(res.data) ? res.data : []);
+          setTeams(list);
+        }
+      } catch (err) {
+        console.error('Failed to load assigned teams/shifts:', err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    void fetchAssignments();
+    return () => { mounted = false; };
+  }, []);
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">My Shifts</h1>
-        <p className="text-gray-500">All your assigned shifts across events</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">My Shifts & Teams</h1>
+          <p className="text-gray-500">Your assigned team and event shift allocations</p>
+        </div>
+        <NavLink
+          to="/my-workforce"
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg shadow-sm transition flex items-center gap-1.5 self-start sm:self-auto"
+        >
+          <Calendar size={14} /> Weekly Schedule & Timesheets →
+        </NavLink>
       </div>
-      <div className="space-y-3">
-        {shifts.map((s) => (
-          <div key={s._id} className="bg-white rounded-xl border border-gray-200 p-5 flex items-center justify-between hover:shadow-md transition">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-lg bg-blue-50 flex items-center justify-center">
-                <Calendar className="w-6 h-6 text-blue-500" />
+
+      {loading ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-500 text-sm">
+          Loading assigned shifts...
+        </div>
+      ) : teams.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
+          <Calendar className="w-10 h-10 text-gray-400 mx-auto mb-3" />
+          <p className="font-semibold text-gray-800">No active shifts assigned yet</p>
+          <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
+            Once a team lead or event head accepts your application or assigns you to an event roster, it will appear here.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {teams.map((t) => (
+            <div key={t._id} className="bg-white rounded-xl border border-gray-200 p-5 flex items-center justify-between hover:shadow-md transition">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                  <Calendar className="w-6 h-6 text-blue-500" />
+                </div>
+                <div>
+                  <p className="font-semibold text-gray-900">{t.eventTitle || t.name}</p>
+                  <p className="text-sm text-gray-500">Team: <span className="font-medium text-gray-700">{t.name}</span></p>
+                  <p className="text-xs text-gray-400 mt-1 flex items-center gap-3">
+                    <span className="flex items-center gap-1"><UsersRound size={12} /> {t.memberCount || t.members?.length || 1} members</span>
+                    {t.leadName && <span className="flex items-center gap-1 font-medium text-gray-600">Lead: {t.leadName}</span>}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="font-semibold">{s.event}</p>
-                <p className="text-sm text-gray-500">{s.role}</p>
-                <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-3">
-                  <span className="flex items-center gap-1"><Calendar size={12} /> {s.date}</span>
-                  <span className="flex items-center gap-1"><Timer size={12} /> {s.time}</span>
-                </p>
-              </div>
+              <span className="text-xs px-3 py-1 rounded-full font-medium bg-emerald-100 text-emerald-700">Active</span>
             </div>
-            <span className={`text-xs px-3 py-1 rounded-full font-medium ${statusColor[s.status]}`}>{s.status}</span>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -7980,45 +7854,43 @@ export const T3DashboardEnhanced = () => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [eventsRes, statsRes] = await Promise.all([
-          api.get('/events/me'),
-          api.get('/stats/t3'),
-        ]);
-        setMyEvents(eventsRes.data.data);
-        setStats(statsRes.data.data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
   const [teamAttendance, setTeamAttendance] = useState([]);
 
   useEffect(() => {
+    let isMounted = true;
     (async () => {
       try {
-        const teamsRes = await api.get('/teams/me');
-        const list = teamsRes.data.data;
-        const withStats = await Promise.all(
-          list.map(async (t) => {
-            try {
-              const s = await api.get(`/attendance/team/stats?teamId=${t._id}`);
-              return { ...t, stats: s.data.data };
-            } catch {
-              return { ...t, stats: null };
-            }
-          })
-        );
-        setTeamAttendance(withStats);
+        const [eventsRes, statsRes, teamsRes] = await Promise.all([
+          api.get('/events/me'),
+          api.get('/stats/t3'),
+          api.get('/teams/me').catch(() => ({ data: { data: [] } })),
+        ]);
+
+        if (!isMounted) return;
+        setMyEvents(eventsRes.data?.data || []);
+        setStats(statsRes.data?.data || null);
+
+        const list = Array.isArray(teamsRes.data?.data) ? teamsRes.data.data : [];
+        if (list.length > 0) {
+          const withStats = await Promise.all(
+            list.map(async (t) => {
+              try {
+                const s = await api.get(`/attendance/team/stats?teamId=${t._id}`);
+                return { ...t, stats: s.data?.data || null };
+              } catch {
+                return { ...t, stats: null };
+              }
+            })
+          );
+          if (isMounted) setTeamAttendance(withStats);
+        }
       } catch (err) {
         console.error(err);
+      } finally {
+        if (isMounted) setLoading(false);
       }
     })();
+    return () => { isMounted = false; };
   }, []);
 
   if (loading) {
@@ -8036,8 +7908,37 @@ export const T3DashboardEnhanced = () => {
     <div className="space-y-6">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Hi {user.name.split(' ')[0]}</h1>
+        <h1 className="text-2xl font-bold">Hi {user?.name ? user.name.split(' ')[0] : 'Executive'}</h1>
         <p className="text-gray-500">Your events and pending tasks</p>
+      </div>
+
+      {/* Workforce Management Hub for T3 Lead */}
+      <div className="bg-gradient-to-r from-purple-900 to-indigo-900 text-white rounded-xl p-5 border border-purple-800 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Calendar className="w-5 h-5 text-purple-300" />
+              <h3 className="font-bold text-base">T3 Workforce Management Hub</h3>
+            </div>
+            <p className="text-xs text-purple-200 max-w-lg">
+              Manage your 7-day team shift matrix, assign inline tasks, review submitted timesheets, and approve attendance regularizations.
+            </p>
+          </div>
+          <div className="flex gap-2 flex-wrap shrink-0">
+            <button
+              onClick={() => navigate('/t3/workforce')}
+              className="px-3.5 py-2 bg-purple-500 hover:bg-purple-600 text-white font-semibold text-xs rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Calendar size={14} /> Shift Calendar & Register
+            </button>
+            <button
+              onClick={() => navigate('/t3/approvals')}
+              className="px-3.5 py-2 bg-white text-purple-900 hover:bg-purple-50 font-semibold text-xs rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <CheckCircle size={14} /> Approvals Inbox
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -8185,8 +8086,27 @@ export const T2DashboardEnhanced = () => {
     <div className="space-y-6">
       <AnnouncementBanner />
       <div>
-        <h1 className="text-2xl font-bold">Hey {user.name.split(' ')[0]}</h1>
+        <h1 className="text-2xl font-bold">Hey {user?.name ? user.name.split(' ')[0] : 'Associate'}</h1>
         <p className="text-gray-500">Here's your activity</p>
+      </div>
+
+      {/* My Workforce & Timesheet Shortcut */}
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl p-5 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Calendar className="w-5 h-5 text-blue-200" />
+            <h3 className="font-bold text-base">Weekly Shifts & Day Timesheet</h3>
+          </div>
+          <p className="text-xs text-blue-100 max-w-md">
+            View your scheduled shifts, assigned team tasks, and log your daily work hours with overtime reporting.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/my-workforce')}
+          className="px-4 py-2 bg-white text-blue-800 font-semibold text-xs rounded-lg shadow-sm hover:bg-blue-50 transition shrink-0 cursor-pointer"
+        >
+          Open Schedule & Timesheet →
+        </button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -8242,47 +8162,6 @@ export const T2DashboardEnhanced = () => {
   );
 };
 
-// ====================================================================
-// SKELETONS
-// ====================================================================
-export const Skeleton = ({ className = '' }) => (
-  <div className={`animate-pulse bg-gray-200 rounded ${className}`} />
-);
-
-export const SkeletonCard = () => (
-  <div className="bg-white p-5 rounded-xl border border-gray-200">
-    <Skeleton className="h-3 w-24 mb-3" />
-    <Skeleton className="h-8 w-20" />
-  </div>
-);
-
-export const SkeletonTable = ({ rows = 5, cols = 4 }) => (
-  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-    <div className="bg-gray-50 border-b border-gray-200 p-4 flex gap-4">
-      {Array.from({ length: cols }).map((_, i) => <Skeleton key={i} className="h-3 flex-1" />)}
-    </div>
-    {Array.from({ length: rows }).map((_, r) => (
-      <div key={r} className="p-4 flex gap-4 border-b border-gray-100 last:border-0">
-        {Array.from({ length: cols }).map((_, c) => <Skeleton key={c} className="h-4 flex-1" />)}
-      </div>
-    ))}
-  </div>
-);
-
-export const SkeletonCardGrid = ({ count = 3 }) => (
-  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-    {Array.from({ length: count }).map((_, i) => (
-      <div key={i} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <Skeleton className="h-32 rounded-none" />
-        <div className="p-5 space-y-3">
-          <Skeleton className="h-4 w-3/4" />
-          <Skeleton className="h-3 w-1/2" />
-        </div>
-      </div>
-    ))}
-  </div>
-);
-
 export const useFakeLoading = (ms = 600) => {
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -8327,16 +8206,15 @@ export const EventDetailPage = () => {
   };
 
   useEffect(() => {
-    (async () => {
-      await fetchEvent();
-      if (canAddMembers) {
-        try {
-          const res = await api.get('/admin/users');
-          setUsers(res.data.data);
-        } catch (err) { console.error(err); }
-      }
-    })();
-  }, [id, canAddMembers]);
+    void fetchEvent();
+  }, [id]);
+
+  // Defer fetching candidate users until Add Member modal or Edit modal is opened
+  useEffect(() => {
+    if ((addMemberModal || editModal) && canAddMembers && users.length === 0) {
+      api.get('/admin/users').then((res) => setUsers(res.data?.data || [])).catch(console.error);
+    }
+  }, [addMemberModal, editModal, canAddMembers, users.length]);
 
   const addMember = async (userId) => {
     setSaving(true);
@@ -8833,7 +8711,8 @@ export const ProfilePage = () => {
     }
   };
 
-  const cfg = ROLES[user.role];
+  const role = user?.role || 'T1_VOLUNTEER';
+  const cfg = ROLES[role] || ROLES.T1_VOLUNTEER;
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
@@ -8841,7 +8720,7 @@ export const ProfilePage = () => {
         <p className="text-gray-500">Manage your account information and security</p>
       </div>
 
-      {user.role === 'ADMIN' && (
+      {user?.role === 'ADMIN' && (
         <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-3 text-amber-800 text-sm">
           <Info className="w-5 h-5 text-amber-600 shrink-0" />
           <div>
@@ -8852,12 +8731,12 @@ export const ProfilePage = () => {
 
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-center gap-5">
-          <div className="w-20 h-20 rounded-full flex items-center justify-center text-white text-2xl font-bold" style={{ backgroundColor: cfg.color }}>
-            {user.name.charAt(0)}
+          <div className="w-20 h-20 rounded-full flex items-center justify-center text-white text-2xl font-bold" style={{ backgroundColor: cfg?.color || '#0B5CAD' }}>
+            {user?.name ? user.name.charAt(0) : 'U'}
           </div>
           <div className="flex-1">
-            <h2 className="text-xl font-bold">{user.name}</h2>
-            <p className="text-sm text-gray-500">{user.email}</p>
+            <h2 className="text-xl font-bold">{user?.name || 'User'}</h2>
+            <p className="text-sm text-gray-500">{user?.email || ''}</p>
             {user.userId && (
               <p className="text-xs font-mono font-bold text-gray-700 mt-1">User ID: {user.userId}</p>
             )}
@@ -9333,6 +9212,8 @@ export const LandingPage = () => {
 export const ChangePasswordPage = () => {
   const { logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isForced = location.state?.forced || Boolean(sessionStorage.getItem('tbi_token') && !sessionStorage.getItem('tbi_user'));
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -9355,10 +9236,13 @@ export const ChangePasswordPage = () => {
     if (!allValid) return setError('Please complete all requirements');
     setLoading(true);
     try {
-      await api.post('/auth/change-password', { oldPassword, newPassword });
-      alert('Password changed successfully. Please login again.');
-      logout();
-      navigate('/login', { replace: true });
+      await api.post('/auth/change-password', {
+        ...(isForced ? {} : { oldPassword }),
+        newPassword,
+      });
+      sessionStorage.removeItem('tbi_token');
+      if (logout) logout();
+      navigate('/login', { replace: true, state: { successMessage: 'Password changed successfully. Please log in.' } });
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to change password');
     } finally {
@@ -9381,21 +9265,23 @@ export const ChangePasswordPage = () => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium mb-2">Current Password</label>
-              <input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)}
-                placeholder="Your temp password"
-                className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required />
-            </div>
+            {!isForced && (
+              <div>
+                <label className="block text-sm font-medium mb-2">Current Password</label>
+                <input type="password" name="current-password" autoComplete="current-password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)}
+                  placeholder="Your current password"
+                  className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required={!isForced} />
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium mb-2">New Password</label>
-              <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
+              <input type="password" name="new-password" autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="Strong password"
                 className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required />
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">Confirm New Password</label>
-              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
+              <input type="password" name="confirm-password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
                 placeholder="Repeat new password"
                 className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required />
             </div>
@@ -9423,7 +9309,7 @@ export const ChangePasswordPage = () => {
               {loading ? 'Updating...' : 'Change Password & Continue'}
             </button>
 
-            <button type="button" onClick={() => { logout(); navigate('/login'); }}
+            <button type="button" onClick={() => { sessionStorage.removeItem('tbi_token'); if (logout) logout(); navigate('/login'); }}
               className="w-full text-center text-sm text-gray-500 hover:text-gray-700">
               Cancel and logout
             </button>
@@ -9658,8 +9544,8 @@ export const ToggleSwitch = ({ checked, onChange }) => (
 // ====================================================================
 export const AddUserPage = () => {
   const navigate = useNavigate();
-
-
+  const { user: currentUser } = useAuth();
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
 
   const [form, setForm] = useState({
     name: '',
@@ -9692,6 +9578,7 @@ export const AddUserPage = () => {
     { value: 'T1_VOLUNTEER', label: 'T1 Volunteer', desc: 'Event helper, applies to shifts', icon: 'T1', color: 'bg-green-100 text-green-700 border-green-300' },
     { value: 'T2_ASSOCIATE', label: 'T2 Associate', desc: 'Team coordinator, assists T1s', icon: 'T2', color: 'bg-blue-100 text-blue-700 border-blue-300' },
     { value: 'T3_EXECUTIVE', label: 'T3 Executive', desc: 'Senior lead, manages teams', icon: 'T3', color: 'bg-purple-100 text-purple-700 border-purple-300' },
+    ...(isSuperAdmin ? [{ value: 'ADMIN', label: 'Admin', desc: 'System administrator with custom grants', icon: 'AD', color: 'bg-orange-100 text-orange-700 border-orange-300' }] : []),
   ];
 
   if (created) {
@@ -10169,7 +10056,7 @@ export const AnnouncementPopup = () => {
   useEffect(() => {
     if (!user) return;
 
-    const checkKey = `announcements_shown_${user._id}_${new Date().toDateString()}`;
+    const checkKey = `announcements_shown_${user?._id || user?.id || 'guest'}_${new Date().toDateString()}`;
     const alreadyShown = sessionStorage.getItem(checkKey);
     if (alreadyShown) return;
 

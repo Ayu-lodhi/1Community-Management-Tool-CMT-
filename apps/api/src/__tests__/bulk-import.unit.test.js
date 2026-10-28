@@ -376,6 +376,7 @@ test('11. The response contains NO passwords', async () => {
   try {
     adminService.createUser = async (data) => ({
       user: { _id: '507f1f77bcf86cd799439088', name: data.name, email: data.email, role: data.role },
+      emailSent: true,
       tempPassword: 'TBI@generated123',
     });
 

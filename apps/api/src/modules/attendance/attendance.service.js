@@ -18,7 +18,12 @@ const getReadableTeam = async (teamId, requester) => {
   return team;
 };
 
-const today = () => new Date().toISOString().split('T')[0];
+const today = () => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Kolkata',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+}).format(new Date());
 
 const isLate = (cutoffHour = 9, cutoffMinute = 15) => {
   const now = new Date();
@@ -93,6 +98,7 @@ class AttendanceService {
       record = await Attendance.findOneAndUpdate(
         { studentId, teamId, date: targetDate },
         {
+          user: studentId,
           studentId,
           studentName: student.name,
           studentEmail: student.email,
@@ -181,6 +187,7 @@ class AttendanceService {
     const record = await Attendance.findOneAndUpdate(
       { studentId: user.sub, teamId, date: targetDate },
       {
+        user: user.sub,
         studentId: user.sub,
         studentName: userDoc.name,
         studentEmail: userDoc.email,

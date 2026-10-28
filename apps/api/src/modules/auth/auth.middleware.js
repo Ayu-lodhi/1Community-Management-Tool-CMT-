@@ -83,8 +83,17 @@ const validateSessionActivity = (user, decoded) => {
   }
 };
 
+const ACTIVITY_THROTTLE_MS = 60 * 1000; // Throttle DB writes to at most once per 60 seconds per user
+
 const touchUserActivity = async (user, now) => {
+  const previousTime = user.lastActivity ? new Date(user.lastActivity).getTime() : 0;
   user.lastActivity = now;
+
+  // Skip database write if updated within the throttle window
+  if (previousTime > 0 && (now.getTime() - previousTime < ACTIVITY_THROTTLE_MS)) {
+    return;
+  }
+
   const mongoose = require('mongoose');
   if (mongoose.connection?.readyState === 1 && User && typeof User.updateOne === 'function') {
     try {
@@ -94,6 +103,7 @@ const touchUserActivity = async (user, now) => {
     }
   }
 };
+exports.touchUserActivity = touchUserActivity;
 
 // Shared by every mounted HTTP router and the Socket.io handshake.
 const authenticateToken = async (token, allowPasswordChange = false) => {
@@ -211,7 +221,31 @@ exports.requireTeam = (teamName) => {
   };
 };
 // Admin granular permission check (only checks if role is ADMIN)
-const { ROLE_DEFAULT_PERMISSIONS } = require('@tbi/shared-constants/permissions');
+let ROLE_DEFAULT_PERMISSIONS = {
+  ADMIN: [
+    'users:read', 'users:create', 'users:bulk_import', 'users:deactivate',
+    'users:reset_password', 'users:assign_role', 'users:grant_permission',
+    'events:read', 'events:create', 'events:update', 'events:close',
+    'applications:read_all', 'applications:review',
+    'attendance:generate_qr', 'attendance:mark_manual', 'attendance:read',
+    'chat:read', 'chat:write', 'chat:moderate',
+    'certificates:view_own', 'certificates:generate', 'certificates:revoke',
+    'analytics:platform_read', 'analytics:team_read', 'audit_logs:read'
+  ],
+  SUPER_ADMIN: []
+};
+
+import('../../../../../packages/shared-constants/permissions.js')
+  .then((m) => {
+    if (m?.ROLE_DEFAULT_PERMISSIONS) ROLE_DEFAULT_PERMISSIONS = m.ROLE_DEFAULT_PERMISSIONS;
+  })
+  .catch(() => {
+    import('@tbi/shared-constants/permissions')
+      .then((m) => {
+        if (m?.ROLE_DEFAULT_PERMISSIONS) ROLE_DEFAULT_PERMISSIONS = m.ROLE_DEFAULT_PERMISSIONS;
+      })
+      .catch(() => {});
+  });
 
 exports.requireAdminPermission = (requiredPermission) => {
   return async (req, res, next) => {

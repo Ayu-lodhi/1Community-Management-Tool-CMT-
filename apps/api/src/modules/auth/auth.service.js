@@ -58,7 +58,7 @@ const acquireSession = async (userId) => {
   // terminating any previous active session and establishing this login as the active one.
   let updatedUser;
   try {
-    updatedUser = await User.findByIdAndUpdate(
+    const updateQuery = User.findByIdAndUpdate(
       userId,
       {
         $set: {
@@ -68,6 +68,9 @@ const acquireSession = async (userId) => {
       },
       { new: true }
     );
+    updatedUser = typeof updateQuery?.select === 'function'
+      ? await updateQuery.select('+password +mfa +passwordChangeStartedAt')
+      : await updateQuery;
   } catch (err) {
     const error = new Error('Service temporarily unavailable');
     error.statusCode = 503;
@@ -103,7 +106,6 @@ exports.login = async (identifier, password) => {
       ? new Date() > new Date(user.tempPasswordExpiresAt)
       : user.createdAt && (Date.now() - new Date(user.createdAt).getTime() > 7 * 24 * 60 * 60 * 1000);
     if (isExpired) throw new Error('Temporary password expired; ask an administrator to reset it');
-    if (user.passwordChangeStartedAt) throw new Error('Temporary password already used; ask an administrator to reset it');
     user = await repository.consumeTemporaryPassword(user);
     if (!user) throw new Error('Credentials changed or temporary password already used; ask an administrator to reset it');
   }
@@ -114,6 +116,25 @@ exports.login = async (identifier, password) => {
 
   const { updatedUser, sessionId } = await acquireSession(user._id);
   return issueSession(updatedUser, false, sessionId);
+};
+
+exports.forgotPassword = async (email) => {
+  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    throw new Error('Please enter a valid email address');
+  }
+  await ensureDbConnected();
+  const user = await repository.findByEmail(email.trim().toLowerCase());
+  if (!user || !user.isActive) {
+    return { success: true };
+  }
+
+  const adminService = require('../admin/admin.service');
+  try {
+    await adminService.resetPassword(user._id);
+  } catch (err) {
+    console.error('Password reset dispatch error:', err.message);
+  }
+  return { success: true };
 };
 
 exports.verifyMfa = async (challengeToken, code) => {
@@ -163,13 +184,14 @@ const issueSession = (user, isMfaVerified, sessionId) => {
       passwordChangeToken: tokens.sign(user, 'password-change', remaining, { isMfaVerified, sid }),
     };
   }
-  const accessToken = tokens.sign(user, 'access', process.env.JWT_ACCESS_EXPIRY || '15m', {
+  const accessToken = tokens.sign(user, 'access', process.env.JWT_ACCESS_EXPIRY || '30m', {
     role: user.role, isMfaVerified, sid,
   });
   const refreshToken = tokens.sign(user, 'refresh', process.env.JWT_REFRESH_EXPIRY || '7d', { sid });
 
   return {
     user: {
+      id: user._id,
       _id: user._id,
       userId: user.userId,
       name: user.name,
@@ -218,7 +240,7 @@ exports.updateProfile = async (userId, data) => {
   if (changes.length > 0) {
     user.lastProfileUpdatedAt = new Date();
     await user.save();
-    sendProfileUpdatedEmail({
+    await sendProfileUpdatedEmail({
       to: user.email,
       name: user.name,
       updatedFields: changes,
@@ -228,11 +250,13 @@ exports.updateProfile = async (userId, data) => {
   return user.toObject({ virtuals: false });
 };
 
-exports.changePassword = async (credential, oldPassword, newPassword) => {
+exports.changePassword = async (credential, oldPassword, newPassword, reqContext = {}) => {
   const user = await repository.findById(credential.sub);
   if (!user?.isActive || credential.authState !== tokens.authState(user)) {
     throw new Error('Credentials changed; sign in again');
   }
+
+  const callerIp = reqContext.ip || reqContext.headers?.['x-forwarded-for'] || reqContext.socket?.remoteAddress || 'unknown';
 
   if (!user.mustChangePassword) {
     checkAdminDailyLimit(user, 'lastPasswordUpdatedAt', 'change their password');
@@ -246,8 +270,15 @@ exports.changePassword = async (credential, oldPassword, newPassword) => {
       throw new Error('Password replacement required');
     }
   } else {
+    const { checkPasswordRateLimit, recordFailedPasswordChange, resetPasswordRateLimit } = require('../../middleware/rateLimit.middleware');
+    await checkPasswordRateLimit(user._id, callerIp);
+
     if (credential.purpose !== 'access' || typeof oldPassword !== 'string' ||
-        !(await bcrypt.compare(oldPassword, user.password))) throw new Error('Current password is incorrect');
+        !(await bcrypt.compare(oldPassword, user.password))) {
+      await recordFailedPasswordChange(user._id, callerIp);
+      throw new Error('Current password is incorrect');
+    }
+    await resetPasswordRateLimit(user._id, callerIp);
   }
 
   if (typeof newPassword !== 'string' || newPassword.length < 8) {
@@ -263,17 +294,38 @@ exports.changePassword = async (credential, oldPassword, newPassword) => {
   if (!/[^A-Za-z0-9]/.test(newPassword)) throw new Error('Password must contain a special character');
 
   if (await bcrypt.compare(newPassword, user.password)) throw new Error('New password must differ from the current password');
-  const updated = await repository.replacePassword(user, await bcrypt.hash(newPassword, 12));
+  const rounds = parseInt(process.env.BCRYPT_ROUNDS, 10) || 12;
+  const updated = await repository.replacePassword(user, await bcrypt.hash(newPassword, rounds));
   if (!updated) throw new Error('Credentials changed; sign in again');
 
   const mongoose = require('mongoose');
-  if (user.mustChangePassword && mongoose.connection?.readyState === 1 && User && typeof User.updateOne === 'function') {
+  if (mongoose.connection?.readyState === 1 && User && typeof User.updateOne === 'function') {
     try {
       await User.updateOne({ _id: user._id }, { $set: { activeSessionId: null, lastActivity: null } });
     } catch (_) {}
   }
+  try {
+    const { invalidateUserPermissions } = require('../../core/cache/permissionCache');
+    await invalidateUserPermissions(user._id);
+  } catch (_) {}
 
-  sendPasswordChangedEmail({
+  try {
+    const AuditLog = require('../../models/AuditLog.model');
+    if (AuditLog && typeof AuditLog.create === 'function') {
+      await AuditLog.create({
+        action: 'PASSWORD_CHANGED',
+        performedBy: user._id,
+        performedByName: user.name || user.email || '',
+        targetId: user._id,
+        targetType: 'User',
+        ipAddress: callerIp !== 'unknown' ? callerIp : null,
+        details: {},
+        timestamp: new Date(),
+      });
+    }
+  } catch (_) {}
+
+  await sendPasswordChangedEmail({
     to: user.email,
     name: user.name,
   }).catch((err) => console.error('Password changed email failed:', err.message));
@@ -311,7 +363,7 @@ exports.changeEmail = async (credential, newEmail, currentPassword) => {
   user.lastEmailUpdatedAt = new Date();
   await user.save();
 
-  sendEmailChangedEmail({
+  await sendEmailChangedEmail({
     oldEmail,
     newEmail: cleanEmail,
     name: user.name,
