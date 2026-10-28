@@ -8,10 +8,11 @@ This guide describes how to deploy the Community Management Tool (CMT) web appli
 
 When importing the project in the Vercel Dashboard:
 
-- **Framework Preset:** Vite
-- **Root Directory:** `apps/web`
-- **Include files outside the Root Directory:** **ENABLED** *(Crucial: Allows the build and serverless packaging to access monorepo packages like `packages/shared-constants`)*
-- **Node.js Version:** `22.x` *(configured in `package.json` engines)*
+- **Framework Preset:** Vite (or Other)
+- **Root Directory:** `.` *(Monorepo root — leave default / do not select apps/web)*
+- **Build Command:** Handled automatically by root `vercel.json` (`npm run build --workspace=@tbi/web`)
+- **Output Directory:** Handled automatically by root `vercel.json` (`apps/web/dist`)
+- **Node.js Version:** `20.x` or `22.x` *(configured in `package.json` engines)*
 
 ---
 
@@ -88,10 +89,10 @@ This returns the database connection status, any missing environment variables, 
 
 ---
 
-## 6. Monorepo Fallback Deployment
+## 6. Monorepo Deployment Architecture
 
-If a Vercel preview deployment fails to locate `@tbi/shared-constants` when building from `apps/web`:
+The repository uses a single unified root Vercel configuration (`vercel.json`):
 
-1. Set the Vercel **Root Directory** to `.` (the monorepo root).
-2. Use the root configuration reference stored in `docs/deploy/vercel.root-api.example.json`.
-3. Set the build command to `npm run build --workspace=@tbi/web` and output directory to `apps/web/dist`.
+1. **Frontend:** Built via `npm run build --workspace=@tbi/web` into `apps/web/dist` and served statically as an SPA with catch-all rewrites to `index.html`.
+2. **Serverless API:** Routed via `/api/(.*)` to `api/index.js`, which packages the backend Express app from `apps/api` along with monorepo packages in `packages/**`.
+3. **Database:** Auto-connects lazily with Atlas shard hostname normalization and connection pooling to ensure zero connection leaks across serverless warm/cold invocations.
