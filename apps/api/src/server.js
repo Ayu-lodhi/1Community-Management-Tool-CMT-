@@ -40,7 +40,7 @@ const isAllowedOrigin = (origin) => {
   if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) return true;
   if (process.env.VERCEL) {
     const proj = process.env.VERCEL_PROJECT_NAME;
-    if (proj && (origin === `https://${proj}.vercel.app` || origin.startsWith(`https://${proj}-`))) return true;
+    if (proj && (origin === `https://${proj}.vercel.app` || (origin.startsWith(`https://${proj}-`) && origin.endsWith('.vercel.app')))) return true;
     if (process.env.VERCEL_URL && origin === `https://${process.env.VERCEL_URL}`) return true;
   }
   if (process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {

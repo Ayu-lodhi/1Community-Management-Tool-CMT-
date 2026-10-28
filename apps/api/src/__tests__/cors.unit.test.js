@@ -55,6 +55,11 @@ test('CORS configuration on real server.js', async (t) => {
     caseEnv = {
       NODE_ENV: process.env.NODE_ENV,
       ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS,
+      VERCEL: process.env.VERCEL,
+      VERCEL_PROJECT_NAME: process.env.VERCEL_PROJECT_NAME,
+      VERCEL_URL: process.env.VERCEL_URL,
+      FRONTEND_URL: process.env.FRONTEND_URL,
+      CLIENT_URL: process.env.CLIENT_URL,
     };
   });
 
@@ -131,6 +136,35 @@ test('CORS configuration on real server.js', async (t) => {
     });
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.headers.get('access-control-allow-origin'), 'http://localhost:3000');
+    assert.strictEqual(res.headers.get('access-control-allow-credentials'), 'true');
+  });
+
+  await t.test('(g) VERCEL: external domain starting with project prefix (e.g. evil.com) is rejected', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.VERCEL = '1';
+    process.env.VERCEL_PROJECT_NAME = 'tbi-portal';
+    delete process.env.ALLOWED_ORIGINS;
+    delete process.env.CLIENT_URL;
+    delete process.env.FRONTEND_URL;
+
+    const res = await fetch(baseUrl, {
+      headers: { Origin: 'https://tbi-portal-evil.com', Connection: 'close' },
+    });
+    assert.strictEqual(res.headers.get('access-control-allow-origin'), null);
+  });
+
+  await t.test('(h) VERCEL: legitimate vercel preview domain matching project is allowed', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.VERCEL = '1';
+    process.env.VERCEL_PROJECT_NAME = 'tbi-portal';
+    delete process.env.ALLOWED_ORIGINS;
+    delete process.env.CLIENT_URL;
+    delete process.env.FRONTEND_URL;
+
+    const res = await fetch(baseUrl, {
+      headers: { Origin: 'https://tbi-portal-git-feat-team.vercel.app', Connection: 'close' },
+    });
+    assert.strictEqual(res.headers.get('access-control-allow-origin'), 'https://tbi-portal-git-feat-team.vercel.app');
     assert.strictEqual(res.headers.get('access-control-allow-credentials'), 'true');
   });
 });

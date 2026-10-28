@@ -1070,18 +1070,6 @@ export const Sidebar = () => {
       </nav>
       <div className="border-t border-white/10 p-2 space-y-1">
         <button
-          onClick={() => {
-            logout();
-            navigate('/login?switch=true');
-            setMobileOpen(false);
-          }}
-          title="Switch to another user role"
-          className="w-full flex items-center gap-3 h-10 px-3 rounded-lg text-xs font-semibold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-colors"
-        >
-          <Key className="w-4 h-4 shrink-0 text-amber-400" />
-          {(!collapsed || mobileOpen) && <span className="truncate">Switch Role</span>}
-        </button>
-        <button
           onClick={() => { logout(); navigate('/login'); setMobileOpen(false); }}
           className="w-full flex items-center gap-3 h-10 px-3 rounded-lg text-sm text-gray-300 hover:bg-white/5 hover:text-white transition-colors"
         >
