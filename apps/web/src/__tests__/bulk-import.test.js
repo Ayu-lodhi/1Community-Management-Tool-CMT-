@@ -13,11 +13,16 @@ function parse(emails) {
     `Test User,${email},,T1_VOLUNTEER`).join('\n');
   // A VM deadline can interrupt a synchronous regex regression; a test timer cannot.
   const result = vm.runInNewContext(`${parser[0]}\nparseCSV(text);`, { text }, { timeout: 1000 });
-  return JSON.parse(JSON.stringify(result));
+  const parsed = JSON.parse(JSON.stringify(result));
+  return {
+    rows: parsed.preview || parsed.rows,
+    validRows: parsed.rows,
+    errs: parsed.errs,
+  };
 }
 
 test('normal CSV emails remain eligible for import', () => {
-  const emails = ['user@example.com', 'first.last+tag@sub.example.co.uk', ' USER@EXAMPLE.COM '];
+  const emails = ['user@example.com', 'first.last+tag@sub.example.co.uk', ' USER2@EXAMPLE.COM '];
   const { rows, errs } = parse(emails);
   assert.deepEqual(errs, []);
   assert.deepEqual(rows.map(row => row.email), emails.map(email => email.trim()));

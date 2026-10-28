@@ -1,8 +1,0 @@
-{
-  "name": "tbi-server",
-  "version": "1.0.0",
-  "type": "commonjs",
-  "scripts": {
-    "test": "node -r ../test-setup.js --test __tests__/*.unit.test.js modules/auth/__tests__/password-bytes.test.js"
-  }
-}

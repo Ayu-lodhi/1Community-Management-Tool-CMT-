@@ -15,29 +15,68 @@ const escapeHtml = (value) => String(value)
 //   2. PROD: Uses real SMTP (Gmail/SendGrid)
 // ====================================================================
 
+const deriveSesSmtpPassword = (secretKey, region = 'ap-south-1') => {
+  const crypto = require('crypto');
+  const DATE = '11111111';
+  const SERVICE = 'ses';
+  const MESSAGE = 'SendRawEmail';
+  const TERMINAL = 'aws4_request';
+  const VERSION = Buffer.from([0x04]);
+
+  const hmac = (key, data) => crypto.createHmac('sha256', key).update(data).digest();
+
+  const kDate = hmac('AWS4' + secretKey, DATE);
+  const kRegion = hmac(kDate, region);
+  const kService = hmac(kRegion, SERVICE);
+  const kSigning = hmac(kService, TERMINAL);
+  const signature = hmac(kSigning, MESSAGE);
+
+  return Buffer.concat([VERSION, signature]).toString('base64');
+};
+
 let transporter = null;
 let testAccount = null;
+
+const clean = (val) => (typeof val === 'string' ? val.trim() : '');
+
+const getSmtpCredentials = () => {
+  const region = clean(process.env.AWS_REGION) || 'ap-south-1';
+  const user = clean(process.env.EMAIL_USER) || clean(process.env.AWS_ACCESS_KEY_ID);
+  const rawPass = clean(process.env.EMAIL_PASS) || clean(process.env.AWS_SECRET_ACCESS_KEY);
+  const host = clean(process.env.EMAIL_HOST) || `email-smtp.${region}.amazonaws.com`;
+  const hasRealCreds = Boolean(host && user && rawPass);
+
+  const missing = [];
+  if (!user) missing.push('AWS_ACCESS_KEY_ID (or EMAIL_USER)');
+  if (!rawPass) missing.push('AWS_SECRET_ACCESS_KEY (or EMAIL_PASS)');
+
+  return { host, user, rawPass, region, hasRealCreds, missing };
+};
 
 // Initialize transporter
 const initTransporter = async () => {
   if (transporter) return transporter;
 
-  // Check if real SMTP credentials are provided
-  const hasRealCreds = process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS;
+  const { host, user, rawPass, region, hasRealCreds } = getSmtpCredentials();
 
   if (hasRealCreds) {
-    console.log('EMAIL_INIT :: Using real SMTP:', process.env.EMAIL_HOST);
+    console.log('EMAIL_INIT :: Using real SMTP:', host);
     const port = parseInt(process.env.EMAIL_PORT, 10) || 587;
     const isSecure = port === 465;
+    let smtpPass = rawPass;
+    if (smtpPass && !smtpPass.startsWith('B')) {
+      smtpPass = deriveSesSmtpPassword(smtpPass, region);
+    }
     transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
+      host,
       port,
       secure: isSecure,
       requireTLS: !isSecure,
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
+        user,
+        pass: smtpPass,
       },
+      tls: { minVersion: 'TLSv1.2' },
     });
   } else {
     if (process.env.NODE_ENV === 'production') {
@@ -71,13 +110,15 @@ const _resetTransporter = () => {
 
 // Send email (dispatches to worker queue when available, with direct fallback)
 const sendEmail = async ({ to, subject, html, text, requestId, idempotencyKey, forceDirect = false }) => {
-  const hasRealCreds = process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS;
+  const { hasRealCreds, missing } = getSmtpCredentials();
   if (process.env.NODE_ENV === 'production' && !hasRealCreds) {
-    console.error('EMAIL_INIT :: Production SMTP credentials missing (EMAIL_HOST, EMAIL_USER, EMAIL_PASS required)');
-    return { success: false, error: 'SMTP credentials missing in production' };
+    const errorMsg = `SMTP credentials missing in Vercel: missing [${missing.join(', ')}]`;
+    console.error(`EMAIL_INIT :: ${errorMsg}`);
+    return { success: false, error: errorMsg };
   }
 
-  if (!forceDirect && process.env.USE_WORKER_QUEUES !== 'false' && process.env.NODE_ENV !== 'test') {
+  const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  if (!forceDirect && !isServerless && process.env.REDIS_QUEUE_URL && process.env.USE_WORKER_QUEUES !== 'false' && process.env.NODE_ENV !== 'test') {
     try {
       const enqueueResult = await enqueueEmail(
         'sendEmail',
@@ -95,14 +136,38 @@ const sendEmail = async ({ to, subject, html, text, requestId, idempotencyKey, f
   try {
     const t = await initTransporter();
     if (!t) {
-      return { success: false, error: 'SMTP credentials missing in production' };
+      return { success: false, error: `SMTP credentials missing in Vercel: missing [${missing.join(', ')}]` };
     }
-    const info = await t.sendMail({
-      from: process.env.EMAIL_FROM || '"TBI Platform" <noreply@tbi.org>',
+    const cleanFromName = (process.env.SES_FROM_NAME || 'TBI Platform').replace(/^["']+|["']+$/g, '').trim();
+    const fromAddress = process.env.EMAIL_FROM || (process.env.SES_FROM_EMAIL
+      ? `"${cleanFromName}" <${process.env.SES_FROM_EMAIL.trim()}>`
+      : '"TBI Platform" <noreply@tbi.org>');
+
+    const mailHeaders = {};
+    if (process.env.SES_CONFIGURATION_SET) {
+      mailHeaders['X-SES-CONFIGURATION-SET'] = process.env.SES_CONFIGURATION_SET;
+    }
+
+    const sendWithRetry = async (mailer, mailOpts, retries = 2) => {
+      try {
+        return await mailer.sendMail(mailOpts);
+      } catch (err) {
+        const isThrottled = /throttl|rate exceed|454|421/i.test(err?.message || '');
+        if (isThrottled && retries > 0) {
+          await new Promise((r) => setTimeout(r, 600));
+          return sendWithRetry(mailer, mailOpts, retries - 1);
+        }
+        throw err;
+      }
+    };
+
+    const info = await sendWithRetry(t, {
+      from: fromAddress,
       to,
       subject,
       html: html || text,
       text: text || '',
+      headers: Object.keys(mailHeaders).length > 0 ? mailHeaders : undefined,
     });
 
     const redactEmail = (addr) => {

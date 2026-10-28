@@ -49,14 +49,29 @@ exports.getAllCertificates = async (req, res) => {
 exports.issueCertificate = async (req, res) => {
   try {
     const { studentId, studentName, eventId, eventTitle, role } = req.body;
+    if (!studentId || !studentName || !eventTitle) {
+      return res.status(400).json({ success: false, message: 'Missing required certificate details' });
+    }
+
+    if (eventId) {
+      const existing = await Certificate.findOne({ studentId, eventId });
+      if (existing) {
+        return res.status(409).json({
+          success: false,
+          message: 'Certificate has already been issued for this student and event',
+          data: existing,
+        });
+      }
+    }
+
     const certId = 'TBI-' + crypto.randomBytes(4).toString('hex').toUpperCase();
 
     const cert = await Certificate.create({
       studentId,
       studentName,
-      eventId,
+      eventId: eventId || null,
       eventTitle,
-      role,
+      role: role || 'Volunteer',
       certificateId: certId,
     });
 

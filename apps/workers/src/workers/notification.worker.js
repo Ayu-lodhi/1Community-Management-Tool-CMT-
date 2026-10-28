@@ -1,9 +1,28 @@
 import { Worker } from 'bullmq';
 import Redis from 'ioredis';
 import nodemailer from 'nodemailer';
+import crypto from 'crypto';
 import { checkAndSetIdempotencyKey } from '@tbi/shared-utils';
 
 const REDIS_QUEUE_URL = process.env.REDIS_QUEUE_URL || 'redis://localhost:6381/2';
+
+function deriveSesSmtpPassword(secretKey, region = 'ap-south-1') {
+  const DATE = '11111111';
+  const SERVICE = 'ses';
+  const MESSAGE = 'SendRawEmail';
+  const TERMINAL = 'aws4_request';
+  const VERSION = Buffer.from([0x04]);
+
+  const hmac = (key, data) => crypto.createHmac('sha256', key).update(data).digest();
+
+  const kDate = hmac('AWS4' + secretKey, DATE);
+  const kRegion = hmac(kDate, region);
+  const kService = hmac(kRegion, SERVICE);
+  const kSigning = hmac(kService, TERMINAL);
+  const signature = hmac(kSigning, MESSAGE);
+
+  return Buffer.concat([VERSION, signature]).toString('base64');
+}
 
 // Parse Redis Queue connection options
 function getRedisConnection() {
@@ -30,16 +49,25 @@ function getRedisConnection() {
 let transporter = null;
 async function getTransporter() {
   if (transporter) return transporter;
-  const hasRealCreds = process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS;
+  const region = process.env.AWS_REGION || 'ap-south-1';
+  const host = process.env.EMAIL_HOST || (process.env.AWS_REGION ? `email-smtp.${region}.amazonaws.com` : null);
+  const user = process.env.EMAIL_USER || process.env.AWS_ACCESS_KEY_ID;
+  const rawPass = process.env.EMAIL_PASS || process.env.AWS_SECRET_ACCESS_KEY;
+
+  const hasRealCreds = host && user && rawPass;
   if (hasRealCreds) {
+    let smtpPass = rawPass;
+    if (smtpPass && smtpPass.length === 40 && !smtpPass.startsWith('B')) {
+      smtpPass = deriveSesSmtpPassword(smtpPass, region);
+    }
     transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
+      host,
       port: parseInt(process.env.EMAIL_PORT, 10) || 587,
       secure: false,
       requireTLS: true,
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
+        user,
+        pass: smtpPass,
       },
     });
   } else {
@@ -79,13 +107,23 @@ export function startNotificationWorker() {
       }
 
       // 2. Perform Email Sending
+      const fromAddress = process.env.EMAIL_FROM || (process.env.SES_FROM_NAME && process.env.SES_FROM_EMAIL
+        ? `"${process.env.SES_FROM_NAME}" <${process.env.SES_FROM_EMAIL}>`
+        : process.env.SES_FROM_EMAIL || '"TBI Platform" <noreply@tbi.org>');
+
+      const mailHeaders = {};
+      if (process.env.SES_CONFIGURATION_SET) {
+        mailHeaders['X-SES-CONFIGURATION-SET'] = process.env.SES_CONFIGURATION_SET;
+      }
+
       const mailer = await getTransporter();
       const info = await mailer.sendMail({
-        from: process.env.EMAIL_FROM || '"TBI Platform" <noreply@tbi.org>',
+        from: fromAddress,
         to,
         subject,
         html: html || text,
         text: text || '',
+        headers: Object.keys(mailHeaders).length > 0 ? mailHeaders : undefined,
       });
 
       console.log(`[NOTIFICATION_WORKER] Sent email: to=${to}, subject="${subject}", jobId=${job.id}, requestId=${requestId || 'N/A'}`);

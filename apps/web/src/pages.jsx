@@ -232,6 +232,11 @@ export const Login = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showMuralOnMobile, setShowMuralOnMobile] = useState(false);
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState('');
+  const [forgotError, setForgotError] = useState('');
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -267,8 +272,8 @@ export const Login = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          identifier: loginEmail,
-          email: loginEmail,
+          identifier: (loginEmail || '').trim(),
+          email: (loginEmail || '').trim(),
           password: loginPassword,
           captchaId: captchaChallenge?.captchaId,
           captchaAnswer: captchaAnswer.trim(),
@@ -297,16 +302,24 @@ export const Login = () => {
         setLoading(false);
         return;
       }
-      if (data.data?.mustChangePassword && data.data?.passwordChangeToken) {
-        sessionStorage.setItem('tbi_token', data.data.passwordChangeToken);
+      if (data.data?.mustChangePassword) {
+        const token = data.data.passwordChangeToken || data.data.accessToken;
+        if (token) {
+          sessionStorage.setItem('tbi_token', token);
+        }
         navigate('/change-password', { replace: true, state: { forced: true } });
         return;
+      }
+      if (!data.data?.user) {
+        throw new Error('Invalid server response during sign in. Please try again.');
       }
       login(data.data.user, data.data.accessToken);
       navigate(ROLES[data.data.user.role].route);
     } catch (err) {
       const raw = err?.message || '';
-      if (err.status === 409 || /already logged in/i.test(raw)) {
+      if (/temporary password|password replacement/i.test(raw)) {
+        setError(raw);
+      } else if (err.status === 409 || /already logged in/i.test(raw)) {
         setError(raw || 'This account is already logged in on another device');
       } else if (/invalid|incorrect|credential|password|email/i.test(raw) && !/server|init|import|syntax|failed|validation|missing|config/i.test(raw)) {
         setError('Invalid username or password. Please verify your credentials.');
@@ -328,6 +341,34 @@ export const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     await performLogin(email, password);
+  };
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setForgotError('');
+    setForgotMessage('');
+    if (!forgotEmail.trim() || !forgotEmail.includes('@')) {
+      setForgotError('Please enter a valid email address.');
+      return;
+    }
+    setForgotLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setForgotMessage(data.message || 'If an account exists, a reset link has been sent.');
+      } else {
+        setForgotError(data.message || 'Failed to send reset link.');
+      }
+    } catch {
+      setForgotError('Network error. Please try again.');
+    } finally {
+      setForgotLoading(false);
+    }
   };
 
   const handleVerifyMfa = async (e) => {
@@ -544,9 +585,23 @@ export const Login = () => {
 
                   {/* Field 2: Password */}
                   <div>
-                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide mb-1">
-                      Password
-                    </label>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs sm:text-sm text-[#1A1A1A] uppercase tracking-wide">
+                        Password
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForgotEmail(email.includes('@') ? email : '');
+                          setForgotError('');
+                          setForgotMessage('');
+                          setShowForgotModal(true);
+                        }}
+                        className="font-['Space_Mono',monospace] text-[11px] text-[#1B5299] hover:underline cursor-pointer"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
                     <div className="relative flex items-center bg-white border-[2.5px] border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl transition-all focus-within:border-[#1B5299] focus-within:shadow-[3px_3px_0px_0px_#1B5299]">
                       <span className="pl-3 text-slate-500 shrink-0">
                         <Lock className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
@@ -663,6 +718,94 @@ export const Login = () => {
             </form>
           </div>
         </div>
+
+        {/* Forgot Password Modal */}
+        {showForgotModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <div className="relative w-full max-w-md bg-[#FAF8F5] border-[3px] border-[#1A1A1A] rounded-2xl shadow-[6px_6px_0px_0px_#1A1A1A] p-6 text-left">
+              <div className="flex items-center justify-between pb-3 mb-4 border-b-2 border-[#1A1A1A]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-lg bg-[#EBF3FA] border-2 border-[#1A1A1A] flex items-center justify-center text-[#1B5299]">
+                    <Key className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-['Barlow_Condensed',sans-serif] font-black text-xl text-[#1A1A1A] uppercase tracking-wide leading-none">
+                      Reset Password
+                    </h3>
+                    <p className="font-['Space_Mono',monospace] text-[11px] text-[#555] mt-0.5">
+                      We'll send a 1-hour secure link to your email
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotModal(false)}
+                  className="text-slate-500 hover:text-[#1A1A1A] p-1 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {forgotMessage ? (
+                <div className="space-y-4">
+                  <div className="p-3 bg-emerald-50 border-2 border-emerald-600 rounded-xl text-emerald-900 font-['Space_Mono',monospace] text-xs font-bold flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <span>{forgotMessage}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotModal(false)}
+                    className="w-full py-2.5 bg-[#1B5299] hover:bg-[#15427D] text-white border-2 border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl font-['Barlow_Condensed',sans-serif] font-black uppercase text-sm cursor-pointer"
+                  >
+                    Back to Sign In
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleForgotPassword} className="space-y-4">
+                  {forgotError && (
+                    <div className="p-2.5 bg-red-50 border-2 border-[#C8322B] rounded-xl text-xs text-[#C8322B] font-['Space_Mono',monospace] font-bold">
+                      {forgotError}
+                    </div>
+                  )}
+                  <div>
+                    <label className="block font-['Barlow_Condensed',sans-serif] font-black text-xs text-[#1A1A1A] uppercase tracking-wide mb-1">
+                      Account Email
+                    </label>
+                    <div className="relative flex items-center bg-white border-[2px] border-[#1A1A1A] shadow-[2px_2px_0px_0px_#1A1A1A] rounded-xl">
+                      <span className="pl-3 text-slate-500 shrink-0">
+                        <Mail className="w-4 h-4" />
+                      </span>
+                      <input
+                        type="email"
+                        value={forgotEmail}
+                        onChange={(e) => setForgotEmail(e.target.value)}
+                        placeholder="name@domain.com"
+                        required
+                        className="flex-1 bg-transparent font-['Space_Mono',monospace] text-xs text-[#1A1A1A] py-2 px-2.5 outline-none font-medium"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotModal(false)}
+                      className="px-4 py-2 border-2 border-[#1A1A1A] rounded-xl font-['Barlow_Condensed',sans-serif] font-bold uppercase text-sm text-[#1A1A1A] hover:bg-slate-100 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      className="px-5 py-2 bg-[#1B5299] hover:bg-[#15427D] text-white border-2 border-[#1A1A1A] shadow-[3px_3px_0px_0px_#1A1A1A] rounded-xl font-['Barlow_Condensed',sans-serif] font-black uppercase text-sm cursor-pointer disabled:opacity-50"
+                    >
+                      {forgotLoading ? 'Sending...' : 'Send Reset Link'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
@@ -1396,7 +1539,11 @@ export const UserManagement = () => {
       setModal(false);
       setForm({ name: '', email: '', phone: '', role: 'T1_VOLUNTEER' });
       if (res.data?.emailSent === false) {
-        alert(`User created, but welcome email could not be sent (SMTP not configured or failed).\n\nPlease check server email settings.`);
+        const errorMsg = res.data?.emailError ? `\n\nDelivery Error: ${res.data.emailError}` : '';
+        const credsMsg = res.data?.tempPassword
+          ? `\n\nLogin Credentials:\nUser ID / Email: ${res.data.data.userId || res.data.data.email}\nTemporary Password: ${res.data.tempPassword}\n\nPlease share these credentials directly with ${res.data.data.name}. They will be prompted to set a new password on first login.`
+          : '';
+        alert(`User created, but welcome email could not be sent (SMTP not configured or failed).${errorMsg}${credsMsg}\n\nPlease check email provider settings in Vercel.`);
       } else {
         alert(`User created!\n\nAn email with login credentials has been sent to ${res.data.data.email}.`);
       }
@@ -1413,11 +1560,15 @@ export const UserManagement = () => {
     if (!confirm(`Send a secure password reset link to ${u.name}?\n\nA one-time link will be emailed to: ${u.email}\nThe link will expire in 1 hour.`)) return;
     try {
       const res = await api.post(`/admin/users/${u._id}/reset-password`);
-      const { emailSent } = res.data;
+      const { emailSent, emailError, resetUrl } = res.data;
       if (emailSent) {
         alert(`Reset link sent!\n\nA secure one-time password reset link has been emailed to:\n${u.email}\n\nThe link expires in 1 hour and can only be used once.`);
       } else {
-        alert(`Reset link generated but email delivery failed.\n\nPlease try again or contact your email provider.`);
+        const errorDetail = emailError ? `\n\nDelivery Error: ${emailError}` : '';
+        const linkMsg = resetUrl
+          ? `\n\nOne-time reset link:\n${resetUrl}\n\nYou can copy and share this link directly with ${u.name} (valid for 1 hour).\n\nTip: You can also click "Set Password" on their row to set their password directly.`
+          : `\n\nPlease try again or use the "Set Password" button to set their password directly.`;
+        alert(`Reset link generated but email delivery failed.${errorDetail}${linkMsg}`);
       }
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to send reset link');
@@ -4325,6 +4476,13 @@ export const AttendancePage = () => {
 
   // --- T3 Link & QR Generator State ---
   const [durationMinutes, setDurationMinutes] = useState(10);
+  const [sessionLabel, setSessionLabel] = useState('');
+  const [geoEnabled, setGeoEnabled] = useState(false);
+  const [radiusM, setRadiusM] = useState(100); // 100m default, options: 30, 50, 100
+  const [venueCoords, setVenueCoords] = useState(null);
+  const [capturingGeo, setCapturingGeo] = useState(false);
+  const [rollingEnabled, setRollingEnabled] = useState(false);
+  const [rollingInfo, setRollingInfo] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [generatedLink, setGeneratedLink] = useState(null);
   const [countdownMs, setCountdownMs] = useState(null);
@@ -4380,6 +4538,27 @@ export const AttendancePage = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // Poll rolling code if enabled on active link
+  useEffect(() => {
+    if (!generatedLink?.token || !generatedLink?.rolling?.enabled || !generatedLink.active) {
+      setRollingInfo(null);
+      return;
+    }
+
+    const fetchRolling = async () => {
+      try {
+        const res = await api.get(`/attendance/link/${generatedLink.token}/rolling`);
+        setRollingInfo(res.data.data);
+      } catch (err) {
+        console.warn('Failed to fetch rolling code:', err.message);
+      }
+    };
+
+    fetchRolling();
+    const interval = setInterval(fetchRolling, 3000);
+    return () => clearInterval(interval);
+  }, [generatedLink?.token, generatedLink?.rolling?.enabled, generatedLink?.active]);
+
   // Live countdown timer for active generated link
   useEffect(() => {
     if (!generatedLink?.expiresAt || !generatedLink.active) {
@@ -4400,16 +4579,62 @@ export const AttendancePage = () => {
     return () => clearInterval(interval);
   }, [generatedLink?.expiresAt, generatedLink?.active]);
 
+  const handleCaptureVenue = () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser');
+      return;
+    }
+    setCapturingGeo(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setVenueCoords({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        });
+        setCapturingGeo(false);
+      },
+      (err) => {
+        alert(`Failed to capture location: ${err.message}`);
+        setCapturingGeo(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
   // Handle generating new link & QR
   const handleGenerateLink = async (e) => {
     e?.preventDefault();
     setGenerating(true);
     setGenError('');
+    if (geoEnabled && !venueCoords) {
+      setGenError('Please wait for GPS venue coordinates to be acquired before generating a geofenced session.');
+      setGenerating(false);
+      return;
+    }
     try {
-      const res = await api.post('/attendance/link/generate', { minutes: durationMinutes });
+      const payload = {
+        minutes: durationMinutes,
+        sessionLabel: sessionLabel.trim(),
+      };
+      if (geoEnabled && venueCoords) {
+        payload.geo = {
+          enabled: true,
+          lat: venueCoords.lat,
+          lng: venueCoords.lng,
+          radiusM: radiusM,
+          maxAccuracyM: 100,
+        };
+      }
+      if (rollingEnabled) {
+        payload.rolling = {
+          enabled: true,
+          stepSeconds: 30,
+        };
+      }
+      const res = await api.post('/attendance/link/generate', payload);
       setGeneratedLink(res.data.data);
       setCopied(false);
-      // Refresh panel in case stats changed
       void fetchPanelData();
     } catch (err) {
       setGenError(err.response?.data?.message || err.message || 'Failed to generate link');
@@ -4676,6 +4901,81 @@ export const AttendancePage = () => {
                     </div>
                   </div>
 
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 uppercase mb-1.5">
+                      Session Name / Slot (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Morning Briefing, Workshop 1"
+                      value={sessionLabel}
+                      onChange={(e) => setSessionLabel(e.target.value)}
+                      className="w-full h-10 px-3.5 rounded-xl border border-gray-300 outline-none focus:border-indigo-500 text-xs font-medium text-slate-800"
+                    />
+                  </div>
+
+                  {/* Geofencing & Rolling Toggles */}
+                  <div className="pt-2 border-t border-gray-100 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={geoEnabled}
+                          onChange={(e) => {
+                            setGeoEnabled(e.target.checked);
+                            if (e.target.checked && !venueCoords) handleCaptureVenue();
+                          }}
+                          className="rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>Geofence Venue</span>
+                      </label>
+                      {geoEnabled && (
+                        <div className="flex gap-1 text-[11px]">
+                          {[100, 50, 30].map((r) => (
+                            <button
+                              key={r}
+                              type="button"
+                              onClick={() => setRadiusM(r)}
+                              className={`px-2 py-0.5 rounded font-semibold border ${
+                                radiusM === r
+                                  ? 'bg-indigo-600 text-white border-indigo-600'
+                                  : 'bg-gray-50 text-gray-600 border-gray-200'
+                              }`}
+                            >
+                              {r}m{r === 100 ? ' (Def)' : ''}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {geoEnabled && (
+                      <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600 flex items-center justify-between">
+                        <span>{venueCoords ? `Venue Set (±${Math.round(venueCoords.accuracy)}m)` : 'GPS coordinates not set'}</span>
+                        <button
+                          type="button"
+                          onClick={handleCaptureVenue}
+                          disabled={capturingGeo}
+                          className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800"
+                        >
+                          {capturingGeo ? 'Locating...' : venueCoords ? 'Re-capture' : 'Capture My GPS'}
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={rollingEnabled}
+                          onChange={(e) => setRollingEnabled(e.target.checked)}
+                          className="rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>Rolling QR Code (30s OTP)</span>
+                      </label>
+                    </div>
+                  </div>
+
                   <button
                     type="submit"
                     disabled={generating}
@@ -4741,6 +5041,13 @@ export const AttendancePage = () => {
                           className="w-56 h-56 object-contain"
                         />
                       </div>
+                      {rollingInfo?.code && (
+                        <div className="w-full max-w-xs mb-3 p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-center">
+                          <span className="text-[10px] font-mono uppercase font-bold text-indigo-600 tracking-wider">Presenter Live Code</span>
+                          <div className="text-3xl font-mono font-black text-indigo-700 tracking-widest mt-0.5">{rollingInfo.code}</div>
+                          <p className="text-[11px] text-indigo-600 mt-1">Changes in {rollingInfo.secondsRemaining}s</p>
+                        </div>
+                      )}
                       <p className="text-xs text-gray-500 mb-4">Scan with camera to open attendance page</p>
 
                       {/* Link URL with Copy */}
@@ -4878,6 +5185,41 @@ export const AttendancePage = () => {
               </div>
             </div>
 
+            {/* Multi-Session Daily Breakdown */}
+            {panelData?.sessions && panelData.sessions.length > 0 && (
+              <div className="border border-indigo-100 rounded-xl bg-indigo-50/40 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Timer className="w-4 h-4 text-indigo-600" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-900">
+                      Today's Attendance Sessions ({panelData.sessions.length})
+                    </h3>
+                  </div>
+                  <span className="text-[11px] text-indigo-600 font-medium">Multiple sessions active</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {panelData.sessions.map((s, idx) => (
+                    <div key={s.id || idx} className="p-3 bg-white rounded-xl border border-indigo-100 shadow-2xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800 truncate">{s.sessionLabel || `Session ${idx + 1}`}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${s.active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                          {s.active ? 'ACTIVE' : 'ENDED'}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                        <span>Started: {new Date(s.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="font-bold text-indigo-600">{s.presentCount} present</span>
+                      </div>
+                      <div className="mt-1 flex gap-1 text-[10px] text-slate-400">
+                        {s.geoEnabled && <span className="bg-blue-50 text-blue-700 px-1 rounded">Geo {s.radiusM}m</span>}
+                        {s.rollingEnabled && <span className="bg-purple-50 text-purple-700 px-1 rounded">Rolling</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Two Side-by-Side Panels: Present vs Absent Members */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
               {/* Present Members Table */}
@@ -4898,7 +5240,14 @@ export const AttendancePage = () => {
                           {m.name.charAt(0)}
                         </div>
                         <div>
-                          <p className="text-xs font-bold text-slate-800">{m.name}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-xs font-bold text-slate-800">{m.name}</p>
+                            {m.sessionLabel && (
+                              <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium">
+                                {m.sessionLabel}
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[11px] text-gray-400">{m.email}</p>
                         </div>
                       </div>
@@ -5316,6 +5665,8 @@ export const AttendPage = () => {
   const [marking, setMarking] = useState(false);
   const [successData, setSuccessData] = useState(null);
   const [timeLeft, setTimeLeft] = useState(null);
+  const [inputCode, setInputCode] = useState('');
+  const [acquiringLocation, setAcquiringLocation] = useState(false);
 
   const fetchLink = async () => {
     if (!token) return;
@@ -5360,15 +5711,61 @@ export const AttendPage = () => {
     if (marking) return;
     setMarking(true);
     setError('');
+
+    let payload = {};
+
+    if (linkInfo?.rolling?.enabled) {
+      if (!inputCode.trim() || inputCode.trim().length !== 6) {
+        setError('Please enter the full 6-character session code shown on the screen.');
+        setMarking(false);
+        return;
+      }
+      payload.code = inputCode.trim().toUpperCase();
+    }
+
+    if (linkInfo?.geo?.enabled) {
+      if (!navigator.geolocation) {
+        setError('Geolocation is not supported by your browser. Please ask your T3 lead to mark you manually.');
+        setMarking(false);
+        return;
+      }
+
+      setAcquiringLocation(true);
+      let pos;
+      try {
+        pos = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0,
+          });
+        });
+      } catch (geoErr) {
+        setAcquiringLocation(false);
+        setMarking(false);
+        let msg = 'Failed to acquire location.';
+        if (geoErr.code === 1) msg = 'Location access was denied. Please enable location permissions or request manual attendance from your T3 executive.';
+        else if (geoErr.code === 2) msg = 'Location signal unavailable. Please move near a window or outdoors and retry.';
+        else if (geoErr.code === 3) msg = 'Location request timed out. Please retry with a stronger GPS or network connection.';
+        setError(msg);
+        return;
+      }
+      setAcquiringLocation(false);
+
+      payload.lat = pos.coords.latitude;
+      payload.lng = pos.coords.longitude;
+      payload.accuracy = pos.coords.accuracy;
+    }
+
     try {
-      const res = await api.post(`/attendance/link/${token}/mark`, {});
+      const res = await api.post(`/attendance/link/${token}/mark`, payload);
       setSuccessData(res.data.data);
-      // Refresh status
       await fetchLink();
     } catch (err) {
       setError(err.response?.data?.message || err.message || 'Failed to mark attendance');
     } finally {
       setMarking(false);
+      setAcquiringLocation(false);
     }
   };
 
@@ -5500,11 +5897,38 @@ export const AttendPage = () => {
                 )}
               </div>
 
+              {/* Verification Requirements Badges */}
+              {linkInfo.geo?.enabled && (
+                <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 text-xs text-blue-800 flex items-center gap-2">
+                  <MapPin className="w-4 h-4 shrink-0 text-blue-600" />
+                  <span>Venue Geofence active (within {linkInfo.geo.radiusM || 100}m). Location will be verified on click.</span>
+                </div>
+              )}
+
+              {linkInfo.rolling?.enabled && !isAlreadyMarked && !isExpired && !isNotStarted && (
+                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                    6-Character Session Code
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={inputCode}
+                    onChange={(e) => setInputCode(e.target.value.toUpperCase())}
+                    placeholder="e.g. 8K2X9L"
+                    className="w-full text-center font-mono font-black text-xl tracking-widest px-3 py-2 border border-slate-300 rounded-lg outline-none focus:border-indigo-600 bg-white text-slate-900"
+                  />
+                  <p className="text-[11px] text-slate-500 text-center">
+                    Enter the code displayed on the presenter's screen
+                  </p>
+                </div>
+              )}
+
               {/* Already marked indicator */}
               {isAlreadyMarked && (
                 <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-center text-xs font-semibold text-emerald-700 flex items-center justify-center gap-1.5">
                   <Check className="w-4 h-4" />
-                  <span>You have already marked attendance for today!</span>
+                  <span>You have already marked attendance for this session!</span>
                 </div>
               )}
             </div>
@@ -5516,10 +5940,15 @@ export const AttendPage = () => {
               <button
                 type="button"
                 onClick={handleMarkAttendance}
-                disabled={marking}
+                disabled={marking || acquiringLocation}
                 className="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold rounded-xl transition duration-150 shadow-lg shadow-emerald-900/20 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer text-base"
               >
-                {marking ? (
+                {acquiringLocation ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Acquiring GPS Signal...</span>
+                  </>
+                ) : marking ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     <span>Verifying on Server...</span>
@@ -8839,20 +9268,20 @@ export const ChangePasswordPage = () => {
             {!isForced && (
               <div>
                 <label className="block text-sm font-medium mb-2">Current Password</label>
-                <input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)}
+                <input type="password" name="current-password" autoComplete="current-password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)}
                   placeholder="Your current password"
                   className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required={!isForced} />
               </div>
             )}
             <div>
               <label className="block text-sm font-medium mb-2">New Password</label>
-              <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
+              <input type="password" name="new-password" autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="Strong password"
                 className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required />
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">Confirm New Password</label>
-              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
+              <input type="password" name="confirm-password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
                 placeholder="Repeat new password"
                 className="w-full h-12 px-3 rounded-lg border border-gray-200 outline-none focus:border-blue-500" required />
             </div>

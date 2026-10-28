@@ -83,8 +83,17 @@ const validateSessionActivity = (user, decoded) => {
   }
 };
 
+const ACTIVITY_THROTTLE_MS = 60 * 1000; // Throttle DB writes to at most once per 60 seconds per user
+
 const touchUserActivity = async (user, now) => {
+  const previousTime = user.lastActivity ? new Date(user.lastActivity).getTime() : 0;
   user.lastActivity = now;
+
+  // Skip database write if updated within the throttle window
+  if (previousTime > 0 && (now.getTime() - previousTime < ACTIVITY_THROTTLE_MS)) {
+    return;
+  }
+
   const mongoose = require('mongoose');
   if (mongoose.connection?.readyState === 1 && User && typeof User.updateOne === 'function') {
     try {
@@ -94,6 +103,7 @@ const touchUserActivity = async (user, now) => {
     }
   }
 };
+exports.touchUserActivity = touchUserActivity;
 
 // Shared by every mounted HTTP router and the Socket.io handshake.
 const authenticateToken = async (token, allowPasswordChange = false) => {

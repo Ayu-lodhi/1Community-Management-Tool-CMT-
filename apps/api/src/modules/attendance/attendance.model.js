@@ -29,9 +29,24 @@ const attendanceSchema = new mongoose.Schema({
     enum: ['present', 'late', 'absent', 'on_leave', 'half_day'],
     default: 'present',
   },
+  sessionLabel: { type: String, default: '' },
+  verification: {
+    method: {
+      type: String,
+      enum: ['link', 'qr_rolling', 'qr_geo', 'qr_rolling_geo', 'manual'],
+      default: 'link',
+    },
+    geoResult: {
+      type: String,
+      enum: ['verified', 'skipped', 'manual_override'],
+      default: 'skipped',
+    },
+    distanceM: { type: Number, default: null },
+    accuracyM: { type: Number, default: null },
+  },
   method: {
     type: String,
-    enum: ['qr', 'manual', 'self', 'link'],
+    enum: ['qr', 'manual', 'self', 'link', 'qr_rolling', 'qr_geo', 'qr_rolling_geo'],
     default: 'link',
   },
   markedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -41,7 +56,7 @@ const attendanceSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
-// Auto-sync user and studentId before validation
+// Auto-sync user and studentId before validation and on findOneAndUpdate
 attendanceSchema.pre('validate', function (next) {
   if (this.user && !this.studentId) {
     this.studentId = this.user;
@@ -55,8 +70,20 @@ attendanceSchema.pre('validate', function (next) {
   next();
 });
 
-// Unique compound index on { user: 1, date: 1 } so a user can mark only once per day
-attendanceSchema.index({ user: 1, date: 1 }, { unique: true });
+attendanceSchema.pre('findOneAndUpdate', function () {
+  const update = this.getUpdate();
+  if (update) {
+    if (update.studentId && !update.user) update.user = update.studentId;
+    if (update.user && !update.studentId) update.studentId = update.user;
+  }
+});
+
+// Compound index on { user: 1, date: 1, linkId: 1 } and sparse { user: 1, linkId: 1 } for multi-session support
+attendanceSchema.index(
+  { user: 1, date: 1, linkId: 1 },
+  { unique: true, partialFilterExpression: { user: { $exists: true, $type: 'objectId' } } }
+);
+attendanceSchema.index({ user: 1, linkId: 1 }, { unique: true, sparse: true });
 attendanceSchema.index({ studentId: 1, teamId: 1, date: 1 }, { sparse: true });
 attendanceSchema.index({ teamId: 1, date: 1 });
 attendanceSchema.index({ team: 1, date: 1 });

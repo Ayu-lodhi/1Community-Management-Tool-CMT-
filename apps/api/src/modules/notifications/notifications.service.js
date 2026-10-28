@@ -1,7 +1,7 @@
 const Notification = require('./notifications.model');
 const User = require('../admin/admin.model');
 const { emitToUser } = require('../../config/socket');
-const { enqueueEmail } = require('../../core/queues/queue.service');
+const { sendEmail } = require('../../services/email.service');
 
 // Check if a user wants a specific type of notification
 const shouldSend = (prefs, channel, type) => {
@@ -11,11 +11,11 @@ const shouldSend = (prefs, channel, type) => {
   return true;
 };
 
-// BullMQ email queue dispatcher
-// Log only fixed status text: recipient/content data can forge records or expose PII.
+// Dispatches via email queue with automated SMTP fallback
 const queueEmail = async (to, subject, body) => {
-  console.log('[EMAIL QUEUED]');
-  await enqueueEmail('sendEmail', { to, subject, html: body, text: body, type: 'notification' });
+  await sendEmail({ to, subject, html: body, text: body }).catch((err) => {
+    console.error('Notification email delivery failed:', err.message);
+  });
 };
 
 const queueSMS = async (to, body) => {
@@ -62,17 +62,23 @@ exports.notify = async (userId, type, title, message, linkTo = '') => {
   }
 };
 
-// Notify many users
+// Notify many users in concurrent chunks to avoid blocking the event loop
 exports.notifyMany = async (userIds, type, title, message, linkTo = '') => {
   try {
+    if (!Array.isArray(userIds) || userIds.length === 0) return [];
     const results = [];
-    for (const userId of userIds) {
-      const r = await exports.notify(userId, type, title, message, linkTo);
-      if (r) results.push(r);
+    const chunkSize = 20;
+    for (let i = 0; i < userIds.length; i += chunkSize) {
+      const chunk = userIds.slice(i, i + chunkSize);
+      const chunkResults = await Promise.all(
+        chunk.map((userId) => exports.notify(userId, type, title, message, linkTo))
+      );
+      results.push(...chunkResults.filter(Boolean));
     }
     return results;
   } catch (err) {
     console.error('NotifyMany failed:', err.message);
+    return [];
   }
 };
 

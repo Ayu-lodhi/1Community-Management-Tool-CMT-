@@ -43,7 +43,7 @@ test('Self-hosted alphanumeric SVG CAPTCHA with MongoDB TTL', async (t) => {
     Captcha.findOneAndDelete = origFindOneAndDelete;
   });
 
-  await t.test('generates valid 5-character unambiguous code and SVG image', () => {
+  await t.test('generates valid 5-character unambiguous code and secure vector SVG without plaintext leakage', () => {
     const code = captchaService.generateRandomCode(5);
     assert.strictEqual(code.length, 5);
     assert.match(code, /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{5}$/);
@@ -52,7 +52,9 @@ test('Self-hosted alphanumeric SVG CAPTCHA with MongoDB TTL', async (t) => {
     const svg = captchaService.generateCaptchaSvg(code);
     assert.ok(svg.startsWith('<svg'));
     assert.ok(svg.endsWith('</svg>'));
-    assert.ok(svg.includes(code[0]));
+    assert.strictEqual(/<text/i.test(svg), false, 'SVG must NOT contain raw plaintext <text> elements');
+    assert.strictEqual(svg.includes(code), false, 'SVG must NOT contain raw plaintext code');
+    assert.ok(svg.includes('<path'), 'SVG must render characters as vector paths');
   });
 
   await t.test('createCaptchaChallenge persists to MongoDB and returns captchaId and svg', async () => {

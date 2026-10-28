@@ -1,3 +1,4 @@
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '64';
 process.env.VERCEL = process.env.VERCEL || '1';
 const mongoose = require('mongoose');
 let app = null;
@@ -46,7 +47,10 @@ async function connectToDatabase() {
   const uri = normalizeMongoUri(rawUri);
 
   if (!cached.promise || mongoose.connection.readyState === 0 || mongoose.connection.readyState === 3) {
-    cached.promise = mongoose.connect(uri, { serverSelectionTimeoutMS: 8000 }).then((m) => {
+    cached.promise = mongoose.connect(uri, {
+      serverSelectionTimeoutMS: 8000,
+      maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE || '10', 10),
+    }).then((m) => {
       cached.conn = m;
       lastDbError = null;
       lastDbErrorStack = null;
@@ -91,12 +95,14 @@ const handler = async (req, res) => {
   const url = req.url || '';
 
   if (url === '/api/db-status' || url === '/db-status') {
+    if (process.env.NODE_ENV === 'production') {
+      return sendJson(res, 404, { success: false, message: 'Route not found' });
+    }
     await connectToDatabase().catch(() => {});
     return sendJson(res, 200, {
       readyState: mongoose.connection.readyState,
       connected: mongoose.connection.readyState === 1,
-      lastDbError,
-      lastDbErrorStack,
+      lastDbError: lastDbError ? 'Database connection failure' : null,
       has_MONGODB_URI: Boolean(process.env.MONGODB_URI),
     });
   }

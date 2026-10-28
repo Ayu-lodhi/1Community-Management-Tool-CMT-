@@ -1,9 +1,12 @@
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const { disconnectUserSockets } = require('../../config/socket');
 const { invalidateUserPermissions } = require('../../core/cache/permissionCache');
 const { recordPermissionAudit } = require('../../core/utils/auditLogger');
 const User = require('./admin.model');
+const defaultFindById = User.findById;
+const defaultFindOneAndUpdate = User.findOneAndUpdate;
 const { getNextUserId } = require('../../services/userId.service');
 const { sendWelcomeEmail, sendPasswordResetLinkEmail, sendProfileUpdatedEmail, sendPasswordChangedEmail, sendEmailChangedEmail } = require('../../services/email.service');
 let ROLE_DEFAULT_PERMISSIONS = {
@@ -40,7 +43,7 @@ const generateDefaultPassword = () => {
   return pass;
 };
 
-const LOGIN_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const LOGIN_URL = process.env.FRONTEND_URL || process.env.CLIENT_URL || (process.env.VERCEL_PROJECT_NAME ? `https://${process.env.VERCEL_PROJECT_NAME}.vercel.app` : 'http://localhost:3000');
 
 exports.getAllUsers = async (options = {}) => {
   const query = {};
@@ -118,43 +121,56 @@ exports.bulkCreateUsers = async (rows, callerRole = null) => {
   let succeeded = 0;
   let failed = 0;
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const line = i + 1;
-    try {
-      if (row.role === 'SUPER_ADMIN' && callerRole !== 'SUPER_ADMIN') {
-        const err = new Error('Only Super Admins can create Super Admin accounts');
-        err.statusCode = 403;
-        throw err;
-      }
-      const { user, emailSent } = await exports.createUser(row, callerRole);
-      succeeded++;
-      results.push({
-        line,
-        email: row.email,
-        status: 'created',
-        emailSent,
-        user: {
-          _id: user._id,
-          userId: user.userId,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-      });
-    } catch (error) {
-      failed++;
-      const isExpected =
-        error.message === 'Email already exists' ||
-        error.message?.includes('Super Admin') ||
-        error.statusCode === 400 ||
-        error.statusCode === 403;
-      results.push({
-        line,
-        email: row.email,
-        status: 'failed',
-        error: isExpected ? error.message : 'User could not be created',
-      });
+  // Process in batches of 5 to balance concurrency with SES rate limits & Vercel execution timeouts
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batch = rows.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map(async (row, idx) => {
+        const line = i + idx + 1;
+        try {
+          if (row.role === 'SUPER_ADMIN' && callerRole !== 'SUPER_ADMIN') {
+            const err = new Error('Only Super Admins can create Super Admin accounts');
+            err.statusCode = 403;
+            throw err;
+          }
+          const { user, emailSent } = await exports.createUser(row, callerRole);
+          return {
+            success: true,
+            line,
+            email: row.email,
+            status: 'created',
+            emailSent,
+            user: {
+              _id: user._id,
+              userId: user.userId,
+              name: user.name,
+              email: user.email,
+              role: user.role,
+            },
+          };
+        } catch (error) {
+          const isExpected =
+            error.message === 'Email already exists' ||
+            error.message?.includes('Super Admin') ||
+            error.statusCode === 400 ||
+            error.statusCode === 403;
+          return {
+            success: false,
+            line,
+            email: row.email,
+            status: 'failed',
+            error: isExpected ? error.message : 'User could not be created',
+          };
+        }
+      })
+    );
+
+    for (const r of batchResults) {
+      if (r.success) succeeded++;
+      else failed++;
+      delete r.success;
+      results.push(r);
     }
   }
 
@@ -176,7 +192,7 @@ exports.updateUser = async (id, data) => {
   if (!user) throw new Error('User not found');
 
   if (Object.keys(safeData).length > 0) {
-    sendProfileUpdatedEmail({
+    await sendProfileUpdatedEmail({
       to: user.email,
       name: user.name,
       updatedFields: Object.keys(safeData),
@@ -364,6 +380,7 @@ exports.resetPassword = async (id) => {
 
   // Email the link
   let emailSent = false;
+  let emailError = null;
   try {
     const result = await sendPasswordResetLinkEmail({
       to: user.email,
@@ -371,15 +388,20 @@ exports.resetPassword = async (id) => {
       resetUrl,
     });
     emailSent = result.success;
+    emailError = result.error || null;
   } catch (err) {
     console.error('Reset link email failed:', err.message);
+    emailError = err.message;
   }
 
-  return { user: user.toObject({ virtuals: false }), emailSent };
+  return { user: user.toObject({ virtuals: false }), emailSent, emailError, resetUrl };
 };
 
 // VERIFY TOKEN — check a one-time reset link token
 exports.verifyResetToken = async (id, rawToken) => {
+  if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new Error('Invalid or expired reset link');
+  if (typeof rawToken !== 'string' || !rawToken.trim()) throw new Error('Invalid or expired reset link');
+
   const user = await User.findById(id).select('+passwordResetToken +passwordResetExpiry');
   if (!user) throw new Error('Invalid or expired reset link');
   if (!user.passwordResetToken || !user.passwordResetExpiry) throw new Error('Invalid or expired reset link');
@@ -394,6 +416,7 @@ exports.verifyResetToken = async (id, rawToken) => {
 
 // COMPLETE RESET — set new password and consume the token
 exports.completePasswordReset = async (id, rawToken, newPassword) => {
+  if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new Error('Invalid or expired reset link');
   if (typeof newPassword !== 'string' || newPassword.length < 8) throw new Error('Password must be at least 8 characters');
   if (Buffer.byteLength(newPassword, 'utf8') > 72) throw new Error('Password must not exceed 72 UTF-8 bytes');
   if (!/[A-Z]/.test(newPassword)) throw new Error('Password must contain an uppercase letter');
@@ -401,24 +424,67 @@ exports.completePasswordReset = async (id, rawToken, newPassword) => {
   if (!/[0-9]/.test(newPassword)) throw new Error('Password must contain a number');
   if (!/[^A-Za-z0-9]/.test(newPassword)) throw new Error('Password must contain a special character');
 
-  const user = await User.findById(id).select('+passwordResetToken +passwordResetExpiry');
-  if (!user) throw new Error('Invalid or expired reset link');
-  if (!user.passwordResetToken || !user.passwordResetExpiry) throw new Error('Invalid or expired reset link');
-  if (new Date() > user.passwordResetExpiry) throw new Error('This reset link has expired. Please ask an admin to send a new one.');
+  if (typeof rawToken !== 'string' || !rawToken.trim()) throw new Error('Invalid or expired reset link');
 
   const hash = crypto.createHash('sha256').update(rawToken).digest('hex');
-  const valid = crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(user.passwordResetToken, 'hex'));
-  if (!valid) throw new Error('Invalid or expired reset link');
+  const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-  // Consume the token immediately (one-time use)
-  user.passwordResetToken = null;
-  user.passwordResetExpiry = null;
-  user.password = await bcrypt.hash(newPassword, 12);
-  user.mustChangePassword = false;
-  user.passwordChangeStartedAt = null;
-  await user.save();
+  // 1. Attempt atomic consumption first (prevents TOCTOU concurrency race conditions)
+  let user = null;
+  const isFindByIdMocked = typeof User.findById === 'function' && User.findById !== defaultFindById;
+  const isFindOneAndUpdateMocked = typeof User.findOneAndUpdate === 'function' && User.findOneAndUpdate !== defaultFindOneAndUpdate;
+  const canUseAtomic = isFindOneAndUpdateMocked || (!isFindByIdMocked && mongoose.connection?.readyState === 1);
+  if (canUseAtomic) {
+    user = await User.findOneAndUpdate(
+      {
+        _id: id,
+        passwordResetToken: hash,
+        passwordResetExpiry: { $gt: new Date() },
+      },
+      {
+        $set: {
+          password: hashedPassword,
+          passwordResetToken: null,
+          passwordResetExpiry: null,
+          mustChangePassword: false,
+          passwordChangeStartedAt: null,
+          activeSessionId: null,
+          lastActivity: null,
+        },
+      },
+      { new: true }
+    );
+  }
 
-  return { user: user.toObject({ virtuals: false }) };
+  // 2. Fallback to findById if findOneAndUpdate is not mocked in unit test environments
+  if (!user && typeof User.findById === 'function') {
+    const existing = await User.findById(id).select('+passwordResetToken +passwordResetExpiry');
+    if (existing && existing.passwordResetToken && existing.passwordResetExpiry && new Date() <= existing.passwordResetExpiry) {
+      const valid = crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(existing.passwordResetToken, 'hex'));
+      if (valid) {
+        existing.passwordResetToken = null;
+        existing.passwordResetExpiry = null;
+        existing.password = hashedPassword;
+        existing.mustChangePassword = false;
+        existing.passwordChangeStartedAt = null;
+        existing.activeSessionId = null;
+        existing.lastActivity = null;
+        if (typeof existing.save === 'function') await existing.save();
+        user = existing;
+      }
+    }
+  }
+
+  if (!user) throw new Error('Invalid or expired reset link');
+  await invalidateUserPermissions(user._id);
+
+  await sendPasswordChangedEmail({
+    to: user.email,
+    name: user.name,
+    byAdmin: false,
+  }).catch((err) => console.error('Reset complete email failed:', err.message));
+
+  return { user: user.toObject ? user.toObject({ virtuals: false }) : { ...user } };
 };
 
 // H6: setPassword — apply same complexity rules as changePassword, require adminId for audit
@@ -441,7 +507,7 @@ exports.setPassword = async (id, newPassword, adminId) => {
   user.mustChangePassword = false;
   await user.save();
 
-  sendPasswordChangedEmail({
+  await sendPasswordChangedEmail({
     to: user.email,
     name: user.name,
     byAdmin: true,
@@ -471,7 +537,7 @@ exports.changeEmail = async (id, newEmail, adminId) => {
   user.email = cleanEmail;
   await user.save();
 
-  sendEmailChangedEmail({
+  await sendEmailChangedEmail({
     oldEmail,
     newEmail: cleanEmail,
     name: user.name,

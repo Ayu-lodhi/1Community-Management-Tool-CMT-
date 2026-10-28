@@ -73,7 +73,7 @@ exports.getMyAssignments = async (req, res) => {
 
 exports.deleteAssignment = async (req, res) => {
   try {
-    const data = await service.deleteAssignment(req.params.id);
+    const data = await service.deleteAssignment(req.params.id, req.user);
     res.status(200).json({ success: true, data });
   } catch (err) {
     handleWorkforceError(res, err);
