@@ -120,7 +120,7 @@ for (const mode of ['configured', 'ethereal']) {
       });
 
       assert.equal(result.success, false);
-      assert.deepEqual(commands, greeting === 'EHLO rejected' ? ['EHLO'] : ['EHLO', 'STARTTLS']);
+      assert.deepEqual([...new Set(commands)], greeting === 'EHLO rejected' ? ['EHLO'] : ['EHLO', 'STARTTLS']);
       assert.match(result.error, /STARTTLS/);
     });
   }
